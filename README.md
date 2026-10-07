@@ -49,7 +49,7 @@
 ## 使用方式
 
 - **直接读**：`chapters/` 下的方法 + `cases/` 的案例
-- **动手时**：打开 [首次小生意验证单](tools/首次小生意验证单.html)——动手前写四行字，结束后算三笔账（纯前端，数据只在你本地浏览器；仓库发布后可在 GitHub Pages 在线使用，届时 README 会放在线地址）
+- **动手时**：打开 [首次小生意验证单](tools/首次小生意验证单.html)——动手前写四行字，结束后算三笔账（纯前端，数据只在你本地浏览器；在线版：https://xiaoxiaosml-star.github.io/idea-to-done/tools/首次小生意验证单.html ）
 - **对话式带路**（进阶，需要 Claude Code / Cursor 等 AI agent）：先把**整个仓库**克隆到本地，再在 agent 技能目录软链 `skills/idea-to-done/`（安装步骤见该目录下 SKILL.md）。**只复制 skills 文件夹不带仓库，正文不会跟过去**
 
 ## 纠错与投稿

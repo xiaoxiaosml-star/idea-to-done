@@ -10,15 +10,15 @@ description: 当用户有个念头/想法想做成的任何事时使用——备
 本 skill 的内容库（`chapters/`、`cases/`、`tools/`）在本**仓库根目录**，不在 skill 文件夹内。正确安装：
 
 ```bash
-# 1. 克隆整个仓库到本地（地址为占位示例，仓库创建后更新为真实地址）
-git clone https://github.com/<org>/idea-to-done.git
+# 1. 克隆整个仓库到本地
+git clone https://github.com/xiaoxiaosml-star/idea-to-done.git
 
 # 2. 在你的 agent 技能目录里放一个指向本仓库 skill 文件夹的软链（Windows 用 junction / mklink /J）
 #    Claude Code 示例：
-ln -s /path/to/idea-to-done/skills/idea-to-done ~/.claude/skills/idea-to-done
+ln -s ~/idea-to-done/skills/idea-to-done ~/.claude/skills/idea-to-done
 
 # 3. 在技能文件夹里生成仓库根目录指针文件（路径填你实际克隆的位置）：
-echo "/path/to/idea-to-done" > ~/.claude/skills/idea-to-done/ROADBOOK_ROOT.txt
+echo "~/idea-to-done" > ~/.claude/skills/idea-to-done/ROADBOOK_ROOT.txt
 ```
 
 **为什么需要第 3 步**：正文（chapters/）在仓库里、不在技能文件夹里。软链/junction 下用相对路径 `../..` 解析会出错（Node/Python 的路径拼接是词法的），所以技能一律通过 ROADBOOK_ROOT.txt 里写的**仓库绝对路径**找正文——读取本目录下 ROADBOOK_ROOT.txt，其内容即仓库根目录。只复制 skills 文件夹不带仓库、不建指针文件 = 正文丢失，无法工作。
