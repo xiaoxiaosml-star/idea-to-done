@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>首次小生意验证单 · 成事方法论</title>
+<style>
+  :root{--bg:#f7f6f3;--panel:#fff;--ink:#1f2430;--muted:#6b7280;--line:#e5e2dc;--accent:#2f5aa8;--warn:#b45309;--ok:#166534;}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.7}
+  .wrap{max-width:760px;margin:0 auto;padding:32px 20px 80px}
+  h1{font-size:22px;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin-bottom:18px}
+  .card h2{font-size:16px;margin-bottom:12px;padding-left:9px;border-left:4px solid var(--accent)}
+  .card h2.warn{border-left-color:var(--warn)}
+  label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+  input,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;font-family:inherit;background:#fdfdfc}
+  input.bad{border-color:#c0392b;background:#fdf0ef}
+  textarea{min-height:56px;resize:vertical}
+  .row{display:flex;gap:12px}.row>div{flex:1}
+  .hint{font-size:12px;color:var(--muted);margin-top:2px}
+  .btns{display:flex;gap:10px;margin-top:24px;flex-wrap:wrap}
+  button{padding:10px 18px;border:0;border-radius:8px;font-size:14px;cursor:pointer}
+  .primary{background:var(--accent);color:#fff}
+  .ghost{background:#e8e6e1;color:var(--ink)}
+  .calc{background:#f0f4fb;border-radius:8px;padding:12px 14px;margin-top:14px;font-size:14px;line-height:2}
+  .calc b{font-size:16px}
+  footer{margin-top:32px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>首次小生意验证单</h1>
+  <div class="sub">成事方法论 · 工具箱 ｜ 动手之前先写四行字，结束后算三笔账 ｜ 数据只存在你自己的浏览器里</div>
+
+  <div class="card">
+    <h2>一、动手之前：四行字（写死再开始）</h2>
+    <label>1. 本次验证什么（一句话）</label>
+    <input id="q1" placeholder="例：验证 XX 地铁口早市有没有人买 15 元以内的早餐配饮">
+    <div class="row">
+      <div><label>2a. 最多投入多少钱（元）</label><input id="q2a" type="number" min="0" placeholder="100"></div>
+      <div><label>2b. 最多投入多少时间（小时）</label><input id="q2b" type="number" min="0" placeholder="10"></div>
+    </div>
+    <label>3. 什么结果支持继续（写数字，不写感觉）</label>
+    <input id="q3" placeholder="例：≥5 人询问 或 ≥2 单成交">
+    <label>4. 什么情况先停下来</label>
+    <input id="q4" placeholder="例：投入到达上限 / 连续两次 0 询问">
+  </div>
+
+  <div class="card">
+    <h2>二、结束后：结果与三笔账</h2>
+    <div class="row">
+      <div><label>触达了多少人（看到/路过/浏览）</label><input id="r1" type="number" min="0"></div>
+      <div><label>成交几单</label><input id="r2" type="number" min="0"></div>
+    </div>
+    <div class="row">
+      <div>
+        <label>营业额（元）</label>
+        <input id="r3" type="number" step="0.01">
+      </div>
+      <div>
+        <label>已售商品成本（元）</label>
+        <input id="r4" type="number" step="0.01">
+        <div class="hint">= 进价 × 卖出的件数。只算<strong>卖出去</strong>那部分，没卖掉的库存不算在这里</div>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>其他费用（摊位/交通/包装/损耗，元）</label>
+        <input id="r5" type="number" step="0.01">
+        <div class="hint">只在这里填一次。注意：损耗不产生新付款的，不计入下面的现金账</div>
+      </div>
+      <div><label>实际投入时间（小时）</label><input id="r6" type="number" step="0.5"></div>
+    </div>
+    <div class="row">
+      <div>
+        <label>实际收到的钱（销售回款，元）</label>
+        <input id="r7" type="number" min="0" step="0.01">
+        <div class="hint">顾客实际付给你的总额——现金账的"流入"</div>
+      </div>
+      <div>
+        <label>实际支付的钱（采购+费用付款，元）</label>
+        <input id="r8" type="number" min="0" step="0.01">
+        <div class="hint">你真掏出去的总额（含垫进库存的）——现金账的"流出"</div>
+      </div>
+    </div>
+    <label>剩余库存的成本价值（元，选填）</label>
+    <input id="r9" type="number" min="0" step="0.01">
+    <div class="calc" id="calc">填入数字后，这里自动算三笔账。</div>
+  </div>
+
+  <div class="card">
+    <h2 class="warn">三、复盘结论（每周三问）</h2>
+    <label>这周做了什么动作</label>
+    <textarea id="c1"></textarea>
+    <label>结果是什么（数字，不是感觉）</label>
+    <textarea id="c2"></textarea>
+    <label>结论：继续 / 换方案 / 停止（理由一句话）</label>
+    <textarea id="c3" placeholder="例：换方案——有人看没人买，价格带可能不对，下周只改价格"></textarea>
+  </div>
+
+  <div class="btns">
+    <button class="primary" onclick="save()">保存（本地浏览器）</button>
+    <button class="ghost" onclick="exportMd()">导出 Markdown</button>
+    <button class="ghost" onclick="clearAll()">清空重填</button>
+  </div>
+  <footer>方法依据：chapters/03（拆目标·三笔账）、chapters/04（四行字·每周三问）｜本工具纯前端运行，无任何数据上传</footer>
+</div>
+<script>
+const IDS=["q1","q2a","q2b","q3","q4","r1","r2","r3","r4","r5","r6","r7","r8","r9","c1","c2","c3"];
+const NUM_IDS=["q2a","q2b","r1","r2","r3","r4","r5","r6","r7","r8","r9"];
+const STORE_KEY="roadbook-validation-sheet-v2";
+const LEGACY_KEY="roadbook-validation-sheet";
+let migratedNote="";
+function val(id){return document.getElementById(id).value.trim()}
+/* 金额一律按"分"计算，避免浮点误差。空=null（未填）；负数/非法=bad。 */
+function cents(id){
+  const raw=val(id);
+  const el=document.getElementById(id);
+  if(raw===""){el.classList.remove("bad");return{s:"empty",c:null};}
+  const v=Number(raw);
+  if(!isFinite(v)||v<0){el.classList.add("bad");return{s:"bad",c:null};}
+  el.classList.remove("bad");
+  return{s:"ok",c:Math.round(v*100)};
+}
+function yuan(c){return (c/100).toFixed(2)}
+function anyBad(){return NUM_IDS.some(i=>cents(i).s==="bad")}
+/* 三笔账：利润账核心=营业额/已售成本/其他费用；现金账=实际支付-实际收到；库存独立并列展示 */
+function ledger(){
+  const rev=cents("r3"),cogs=cents("r4"),fee=cents("r5"),h=cents("r6");
+  const paid=cents("r8"),got=cents("r7"),inv=cents("r9");
+  if([rev,cogs,fee].some(x=>x.s==="bad"))return{t:"bad"};
+  if(rev.s!=="ok"||cogs.s!=="ok"||fee.s!=="ok")return{t:"incomplete"};
+  const gross=rev.c-cogs.c, profit=gross-fee.c;
+  let cash=null;
+  if(paid.s==="ok"&&got.s==="ok")cash=paid.c-got.c;
+  return{t:"ok",gross,profit,h:h.s==="ok"?h.c:null,cash,inv:inv.s==="ok"?inv.c:null};
+}
+function render(){
+  const box=document.getElementById("calc");
+  const head=migratedNote?('<div style="color:var(--warn);font-size:13px;margin-bottom:6px">'+migratedNote+"</div>"):"";
+  if(anyBad()){box.innerHTML=head+"⚠️ 存在无效输入：金额不能为负，请检查标红的格子。";return}
+  const r=ledger();
+  if(r.t==="bad"){box.innerHTML=head+"⚠️ 数据异常，请检查输入。";return}
+  if(r.t==="incomplete"){box.innerHTML=head+"①② 利润账：<b>资料不全，无法计算</b>——营业额、已售商品成本、其他费用三项都要填（不知道的先去查，别按 0 算）。";return}
+  const lines=[];
+  lines.push("① 利润账：营业额 "+yuan(cents("r3").c)+" - 已售商品成本 "+yuan(cents("r4").c)+" = 毛利 "+yuan(r.gross)+"；再减其他费用 "+yuan(cents("r5").c)+" = <b>净利 "+yuan(r.profit)+" 元</b>");
+  if(r.h!==null)lines.push("② 时间账："+(r.h/100)+" 小时 → 时薪约 <b>"+yuan(r.h>0?Math.round(r.profit/r.h*100):0)+" 元</b>（跟当地零工价比一比）");
+  if(r.cash!==null)lines.push("③ 现金账：实际支付 "+yuan(cents("r8").c)+" - 实际收到 "+yuan(cents("r7").c)+" = 现金净流出 <b>"+yuan(r.cash)+" 元</b>");
+  else lines.push("③ 现金账：实际收到/实际支付未填齐，无法计算");
+  if(r.inv!==null&&r.cash!==null)lines.push("📦 剩余库存成本价值 "+yuan(r.inv)+" 元——货还在你手里，和上面的现金净流出是两笔并列的账");
+  if(r.profit>0)lines.push("✅ 净利为正——但一单不算赢，陌生客户连续成交再谈加码");
+  else if(r.profit===0)lines.push("➖ 收支持平：没赚也没亏，但时间花掉了——按「支持继续的信号」判断下一步");
+  else lines.push("⚠️ 净利为负：营业额高不等于赚钱，先查哪笔账漏了");
+  box.innerHTML=head+lines.join("<br>");
+}
+IDS.forEach(i=>document.getElementById(i).addEventListener("input",render));
+function data(){const d={};IDS.forEach(i=>d[i]=document.getElementById(i).value);return d}
+function save(){
+  try{
+    localStorage.setItem(STORE_KEY,JSON.stringify(data()));
+    migratedNote="";
+    alert("已保存到本浏览器（localStorage）");
+  }catch(e){
+    alert("保存失败（浏览器存储不可用："+(e&&e.message?e.message:"未知原因")+"）。\n请改用「导出 Markdown」，把文件自己存好。");
+  }
+}
+function load(){
+  let d=null;
+  try{
+    const v2=localStorage.getItem(STORE_KEY);
+    if(v2){d=JSON.parse(v2);}
+    else{
+      const legacy=localStorage.getItem(LEGACY_KEY);
+      if(legacy){
+        const old=JSON.parse(legacy);
+        d={};
+        ["q1","q2a","q2b","q3","q4","r1","r2","r3","r4","r5","r6","c1","c2","c3"].forEach(k=>{if(old[k]!==undefined)d[k]=old[k]});
+        if(old.r7!==undefined)d.r9=old.r7;
+        migratedNote="⚠️ 已导入旧版存档：字段含义有变化（原「库存占用现金」已移入「剩余库存」；现金账改为「实际收到/实际支付」）。请核对各栏后重新保存。";
+      }
+    }
+  }catch(e){d=null}
+  if(d)IDS.forEach(i=>{if(d[i]!==undefined)document.getElementById(i).value=d[i]});
+  render();
+}
+function clearAll(){
+  if(confirm("确定清空全部内容？")){
+    IDS.forEach(i=>{const el=document.getElementById(i);el.value="";el.classList.remove("bad")});
+    try{localStorage.removeItem(STORE_KEY)}catch(e){}
+    migratedNote="";
+    render();
+  }
+}
+function exportMd(){
+  const L=["# 首次小生意验证单","","> 导出时间："+new Date().toLocaleString(),"","## 一、四行字",
+  "- 验证什么："+(val("q1")||"（未填）"),
+  "- 最多投入："+(cents("q2a").s==="ok"?yuan(cents("q2a").c):"?")+" 元 / "+(cents("q2b").s==="ok"?yuan(cents("q2b").c):"?")+" 小时",
+  "- 支持继续的信号："+(val("q3")||"（未填）"),
+  "- 停止条件："+(val("q4")||"（未填）"),"","## 二、结果与三笔账",
+  "- 触达："+(cents("r1").s==="ok"?cents("r1").c:"?")+" 人，成交 "+(cents("r2").s==="ok"?cents("r2").c:"?")+" 单"];
+  if(anyBad()){L.push("- ⚠️ 存在无效输入（负数或非法数字），利润账未计算");}
+  else{
+    const r=ledger();
+    if(r.t==="incomplete"){L.push("- ①② 利润账：资料不全，无法计算（营业额/已售商品成本/其他费用未填齐）");}
+    else{
+      L.push("- ① 利润账：营业额 "+yuan(cents("r3").c)+" - 已售商品成本 "+yuan(cents("r4").c)+" - 其他费用 "+yuan(cents("r5").c)+" = **净利 "+yuan(r.profit)+" 元**");
+      if(r.h!==null)L.push("- ② 时间账："+(r.h/100)+" 小时，时薪约 "+yuan(r.h>0?Math.round(r.profit/r.h*100):0)+" 元");
+      if(r.cash!==null)L.push("- ③ 现金账：现金净流出 "+yuan(r.cash)+" 元（实际支付 - 实际收到）");
+      else L.push("- ③ 现金账：实际收到/实际支付未填齐，无法计算");
+      if(r.inv!==null)L.push("- 📦 剩余库存成本价值 "+yuan(r.inv)+" 元（与现金净流出并列，不是其中的一部分）");
+    }
+  }
+  L.push("","","## 三、复盘","1. 动作："+(val("c1")||"（未填）"),"2. 结果："+(val("c2")||"（未填）"),"3. 结论："+(val("c3")||"（未填）"));
+  const blob=new Blob([L.join("\n")],{type:"text/markdown;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="验证单_"+new Date().toISOString().slice(0,10)+".md";a.click();
+}
+load();
+</script>
+</body>
+</html>
