@@ -1,0 +1,7 @@
+{
+  "name": "chengshi-workshop",
+  "version": "0.1.0",
+  "description": "成事工坊成套工作台：把念头讨论成下一步，执行后带着真实结果回来复盘",
+  "author": { "name": "xiaoxiaosml" },
+  "skills": ["./skills/idea-to-done"]
+}

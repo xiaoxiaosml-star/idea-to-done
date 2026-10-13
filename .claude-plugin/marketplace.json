@@ -1,0 +1,11 @@
+{
+  "name": "chengshi-workshop-local",
+  "owner": { "name": "xiaoxiaosml" },
+  "plugins": [
+    {
+      "name": "chengshi-workshop",
+      "source": "./",
+      "description": "成事工坊成套工作台（本地开发与验收用分发目录）"
+    }
+  ]
+}

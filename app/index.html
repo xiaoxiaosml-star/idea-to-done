@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>成事工坊 · 工作台</title>
+<style>
+  :root{
+    --bg:#f5f1ea;--panel:#fffdf9;--ink:#2b2620;--muted:#8a8177;--line:#e3dccc;
+    --wood:#8b5e34;--wood-lt:#c9a877;--ok:#2e7d4f;--warn:#b7791f;--bad:#b23c3c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.7}
+  .wrap{max-width:1080px;margin:0 auto;padding:26px 18px 90px}
+  h1{font-size:22px;letter-spacing:1px}
+  .topnav{position:sticky;top:0;z-index:20;display:flex;gap:8px;background:var(--bg);padding:12px 0;border-bottom:1.5px solid var(--line);margin-bottom:20px}
+  .topnav button{flex:1;background:transparent;border:1.5px solid var(--line);border-radius:10px;padding:9px 4px;font-size:14.5px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}
+  .topnav button.on{background:var(--wood);border-color:var(--wood);color:#fff}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-bottom:18px;box-shadow:0 1px 3px rgba(80,60,30,.06)}
+  .card h2{font-size:16px;margin-bottom:12px;padding-left:10px;border-left:5px solid var(--wood)}
+  button{padding:9px 18px;border:0;border-radius:8px;font-size:13.5px;cursor:pointer;font-family:inherit;transition:.15s}
+  .primary{background:var(--wood);color:#fff}
+  .ghost{background:#ece5d8;color:var(--ink)}
+  .mini{background:#f0ece3;color:var(--muted);font-size:12px;padding:5px 11px}
+  .sub{color:var(--muted);font-size:13px}
+  textarea,input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
+  textarea{min-height:88px;resize:vertical}
+  label{display:block;font-size:12.5px;color:var(--muted);margin:12px 0 4px}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .badge{display:inline-block;font-size:11.5px;padding:2px 10px;border-radius:20px;background:#ece5d8;color:var(--muted);margin-left:8px;vertical-align:2px}
+  .badge.exec{background:#e8f0e9;color:var(--ok)}
+  .badge.done{background:#fdf3e0;color:var(--warn)}
+  .badge.over{background:#f6e3e3;color:var(--bad)}
+  /* 讨论区 */
+  .msg{margin-bottom:14px}
+  .msg .who{font-size:11.5px;color:var(--muted);margin-bottom:3px}
+  .msg.user .bub{background:#efe8db;border-radius:10px;padding:10px 14px;white-space:pre-wrap;font-size:14px}
+  .msg.ai .bub{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;white-space:pre-wrap;font-size:14px}
+  .proto{margin-top:10px;border:1.5px dashed var(--wood-lt);border-radius:10px;padding:12px 14px;background:#fbf6ec}
+  .proto .pt{font-size:12.5px;font-weight:700;color:var(--wood);margin-bottom:8px}
+  .proto .row{font-size:13.5px;margin-bottom:6px}
+  .proto .row b{color:var(--ink)}
+  .proto ol{padding-left:20px;font-size:13.5px}
+  .proto ol li{margin-bottom:8px}
+  .suggest{display:inline-block;font-size:12px;font-weight:700;padding:2px 10px;border-radius:20px;margin-left:6px}
+  .suggest.continue{background:#e8f0e9;color:var(--ok)}
+  .suggest.adjust{background:#fdf3e0;color:var(--warn)}
+  .suggest.pause,.suggest.stop{background:#f6e3e3;color:var(--bad)}
+  .planfield{font-size:13px;margin-bottom:6px}
+  .planfield b{display:inline-block;min-width:76px;color:var(--muted);font-weight:400}
+  .exitem{border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin-bottom:10px;background:#fff}
+  .exitem .ea{font-weight:600;font-size:13.5px}
+  .exitem .em{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .exitem .ev{font-size:13px;background:#f2f8f2;border-left:3px solid var(--ok);padding:6px 10px;margin-top:6px;border-radius:0 6px 6px 0}
+  .cols{display:grid;grid-template-columns:1.15fr .85fr;gap:18px;align-items:start}
+  @media(max-width:860px){.cols{grid-template-columns:1fr}}
+  .statusbar{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+  .toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:#2b2620;color:#fff;padding:10px 22px;border-radius:24px;font-size:13.5px;display:none;z-index:99;max-width:86%}
+  .busy{position:fixed;inset:0;background:rgba(245,241,234,.75);display:none;align-items:center;justify-content:center;z-index:98;font-size:14.5px;color:var(--wood);font-weight:600;text-align:center;padding:20px}
+  .proj{border:1px solid var(--line);border-radius:11px;padding:15px 18px;margin-bottom:12px;background:var(--panel);cursor:pointer}
+  .proj:hover{border-color:var(--wood-lt)}
+  .proj .pi{font-weight:600;font-size:14.5px}
+  .proj .pm{font-size:12px;color:var(--muted);margin-top:3px}
+  .mlist button{display:block;width:100%;text-align:left;margin-bottom:6px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+  .mlist button.on{border-color:var(--wood);color:var(--wood);font-weight:600}
+  pre.md{white-space:pre-wrap;font-size:13.5px;line-height:1.8;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;max-height:60vh;overflow:auto}
+  .empty{color:var(--muted);font-size:13.5px;padding:26px 0;text-align:center}
+  .decide-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .decide-row button{flex:1;min-width:110px;font-size:12.5px;padding:8px 6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛠️ 成事工坊 · 工作台</h1>
+  <div class="sub" style="margin:4px 0 0">讨论、执行、复盘围绕同一件事 ｜ 数据只存在本机</div>
+
+  <div class="topnav">
+    <button id="navStart" class="on" onclick="go('start')">🌱 开始</button>
+    <button id="navList" onclick="go('list')">📂 我的事</button>
+    <button id="navMethods" onclick="go('methods')">📖 方法与示例</button>
+  </div>
+
+  <!-- 开始页 -->
+  <div id="v-start">
+    <div class="card">
+      <h2>有个念头，却不知道怎么开始？</h2>
+      <div class="sub" style="margin-bottom:12px">先和 AI 讨论清楚，再把下一步带到这里做。你的事、计划、证据、复盘都存在同一个地方。</div>
+      <textarea id="ideaInput" placeholder="例如：我想利用晚上时间摆个摊赚点钱，但完全不知道卖什么……"></textarea>
+      <div class="toolbar">
+        <button class="primary" onclick="startDiscuss()">🧭 还没想明白，先帮我理一理</button>
+        <button class="ghost" onclick="startDirect()">✅ 已经有计划，直接开始</button>
+      </div>
+      <div class="sub" id="startHint" style="margin:12px 0 0"></div>
+    </div>
+  </div>
+
+  <!-- 我的事 -->
+  <div id="v-list" style="display:none">
+    <div id="projList"></div>
+  </div>
+
+  <!-- 方法与示例 -->
+  <div id="v-methods" style="display:none">
+    <div class="cols">
+      <div class="card mlist" style="grid-column:1"><h2>目录</h2><div id="methodList"><div class="empty">加载中…</div></div></div>
+      <div class="card" style="grid-column:2"><h2 id="methodTitle">选一篇看</h2><pre class="md" id="methodBody">← 从左栏选择</pre></div>
+    </div>
+  </div>
+
+  <!-- 单件事工作页 -->
+  <div id="v-work" style="display:none">
+    <div class="card">
+      <button class="mini" onclick="go('list')">← 返回我的事</button>
+      <h2 style="margin-top:10px" id="wIdea"></h2>
+      <div class="statusbar" id="wStatus"></div>
+      <div class="decide-row" id="wDecide">
+        <button class="ghost" onclick="decide('done')">🎯 达成</button>
+        <button class="ghost" onclick="decide('go')">🚀 继续验证</button>
+        <button class="ghost" onclick="decide('pause')">⏸ 暂停</button>
+        <button class="ghost" onclick="decide('stop')">🛑 终止</button>
+      </div>
+    </div>
+    <div class="cols">
+      <div>
+        <div class="card">
+          <h2>💬 讨论</h2>
+          <div id="wDiscuss"><div class="empty">还没开始讨论</div></div>
+          <label>接着说（回答、补充情况、新的疑问）</label>
+          <textarea id="wInput" style="min-height:64px"></textarea>
+          <div class="toolbar">
+            <button class="primary" onclick="sendMessage()">发送</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card" id="wPlanCard">
+          <h2>📋 当前计划</h2>
+          <div id="wPlan"><div class="empty">还没有计划草案</div></div>
+        </div>
+        <div class="card">
+          <h2>📥 执行与证据</h2>
+          <div id="wExecList"></div>
+          <label>动作（对应计划里的哪一步）</label>
+          <input type="text" id="eAction">
+          <label>实际投入（时间/钱，写数字）</label>
+          <input type="text" id="eInput">
+          <label>结果（实际发生了什么）</label>
+          <input type="text" id="eResult">
+          <label>证据（真实数字 / 原话 / 观察记录）</label>
+          <input type="text" id="eEvidence">
+          <label>备注（可选）</label>
+          <input type="text" id="eNote">
+          <div class="toolbar">
+            <button class="primary" onclick="saveExec()">记下这条结果</button>
+          </div>
+          <div class="toolbar">
+            <button class="ghost" onclick="doReview()">🫱 带着结果继续讨论（复盘）</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="busy" id="busy">正在和成事工坊讨论…<br><span style="font-size:12px;font-weight:400">真实调用本机 Claude Code，约需 1 分钟，请稍候</span></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN='__TOKEN__';
+let cur=null, curBase=0;
+
+function toast(t){const el=document.getElementById('toast');el.textContent=t;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',3600);}
+function busy(on){document.getElementById('busy').style.display=on?'flex':'none';}
+async function api(path,body,method){
+  const r=await fetch(path,{method:method||(body?'POST':'GET'),
+    headers:{'Content-Type':'application/json','x-chengshi-token':TOKEN},
+    body:body?JSON.stringify(body):undefined});
+  const d=await r.json().catch(()=>({error:'bad-response'}));
+  if(r.status===401){toast('服务鉴权失败,请从启动器重新打开工作台');throw new Error('401');}
+  if(r.status===409){toast('数据有更新,已为你刷新');await openProject(cur.id);throw new Error('409');}
+  if(!r.ok){toast('出错：'+(d.detail||d.error||r.status));throw new Error(d.error||r.status);}
+  return d;
+}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function go(v){
+  for(const k of ['start','list','methods','work'])document.getElementById('v-'+k).style.display=(k===v)?'':'none';
+  for(const k of ['start','list','methods'])document.getElementById('nav'+k[0].toUpperCase()+k.slice(1)).classList.toggle('on',k===v);
+  if(v==='list')loadList();
+  if(v==='methods')loadMethods();
+}
+
+/* ---- 开始页 ---- */
+async function startDiscuss(){await createProject('discuss');}
+async function startDirect(){await createProject('direct');}
+async function createProject(mode){
+  const idea=document.getElementById('ideaInput').value.trim();
+  if(!idea){toast('先写下一句话念头');return;}
+  busy(true);
+  try{
+    const d=await api('/api/projects',{idea,mode});
+    cur=d.project;curBase=cur.version;
+    await openProject(cur.id);
+    if(mode==='discuss'){
+      /* 开场由 Skill 主动澄清,不让用户先写计划 */
+      await sendMessage('【新念头】'+idea+'\n我现在没有计划,请先按成事方法论帮我理清:这事要投入之前,你最需要向我澄清的是什么?');
+    }else{
+      toast('已建好事项,在右侧直接写你的计划');
+    }
+  }catch(e){/*已提示*/}
+  busy(false);
+}
+
+/* ---- 我的事 ---- */
+async function loadList(){
+  const d=await api('/api/projects');
+  const el=document.getElementById('projList');
+  if(!d.projects.length){el.innerHTML='<div class="card"><div class="empty">还没有事。从「开始」页丢一个念头进来。</div></div>';return;}
+  el.innerHTML=d.projects.map(p=>{
+    const st={discuss:['讨论中','exec'],execute:['执行中','exec'],review:['刚复盘','exec']}[p.stage]||['',''];
+    const dc=p.decision?{done:['已达成','done'],go:['继续验证','exec'],pause:['已暂停','over'],stop:['已终止','over']}[p.decision.type]:null;
+    return `<div class="proj" onclick="openProject('${p.id}')"><div class="pi">${esc(p.idea)}</div>
+      <div class="pm">更新于 ${p.updatedAt.slice(0,16).replace('T',' ')} <span class="badge ${st[1]}">${st[0]}</span>${dc?`<span class="badge ${dc[1]}">${dc[0]}</span>`:''}</div></div>`;
+  }).join('');
+}
+
+/* ---- 工作页 ---- */
+async function openProject(id){
+  const d=await api('/api/projects/'+id);
+  cur=d.project;curBase=cur.version;
+  go('work');
+  render();
+}
+function stageBadge(p){
+  if(p.decision)return `<span class="badge done">结局:${{done:'达成',go:'继续验证',pause:'暂停',stop:'终止'}[p.decision.type]}</span>`;
+  return {discuss:'<span class="badge">讨论中</span>',execute:'<span class="badge exec">执行中</span>',review:'<span class="badge exec">已复盘·待你决定</span>'}[p.stage]||'';
+}
+function render(){
+  const p=cur;
+  document.getElementById('wIdea').textContent=p.idea;
+  document.getElementById('wStatus').innerHTML=stageBadge(p)
+    +(p.sessionId?' ｜ 独立会话 '+p.sessionId.slice(0,8):'')
+    +(p.plan&&p.plan.status==='confirmed'?' ｜ 计划 v'+p.plan.version+' 已确认':'')
+    +(p.decision?' ｜ 理由：'+esc(p.decision.reason):'');
+  renderDiscuss(p);renderPlan(p);renderExec(p);
+}
+function renderDiscuss(p){
+  const el=document.getElementById('wDiscuss');
+  if(!p.discussion.length){el.innerHTML='<div class="empty">还没开始讨论</div>';return;}
+  el.innerHTML=p.discussion.map(m=>{
+    let proto='';
+    if(m.protocol){
+      const d=m.protocol;
+      if(d.type==='questions')proto=`<div class="proto"><div class="pt">❓ 需要你补充（可直接在下方回复里逐条回答）</div><ol>${d.items.map(q=>'<li>'+esc(q)+'</li>').join('')}</ol></div>`;
+      else if(d.type==='plan')proto=planProtoHtml(d,false);
+      else if(d.type==='review')proto=`<div class="proto"><div class="pt">🔁 复盘建议<span class="suggest ${d.suggest}">${{continue:'继续',adjust:'调整',pause:'暂停',stop:'终止'}}[d.suggest]</span></div>
+        <div class="row"><b>对照结果：</b>${esc(d.result)}</div>
+        ${d.assumptionDelta?`<div class="row"><b>假设变化：</b>${esc(d.assumptionDelta)}</div>`:''}
+        ${d.stillUnknown?`<div class="row"><b>仍未知：</b>${esc(d.stillUnknown)}</div>`:''}
+        ${d.next?`<div class="row"><b>建议下一步：</b>${esc(d.next)}</div>`:''}</div>`;
+    }
+    return `<div class="msg ${m.role}"><div class="who">${m.role==='user'?'你':'成事工坊'} ｜ ${m.at.slice(0,16).replace('T',' ')}</div><div class="bub">${esc(m.text)}</div>${proto}</div>`;
+  }).join('');
+  el.scrollTop=el.scrollHeight;
+}
+function planProtoHtml(d,confirmed){
+  return `<div class="proto"><div class="pt">📋 计划草案${confirmed?'（已确认）':'（待你确认）'}</div>
+    <div class="planfield"><b>要验证</b>${esc(d.question)}</div>
+    <div class="planfield"><b>具体动作</b>${esc(d.action)}</div>
+    <div class="planfield"><b>做到算完</b>${esc(d.accept)}</div>
+    <div class="planfield"><b>投入上限</b>${esc(d.budget)}</div>
+    <div class="planfield"><b>该停就停</b>${esc(d.stop)}</div>
+    <div class="planfield"><b>带回证据</b>${esc(d.evidenceToBring)}</div></div>`;
+}
+function renderPlan(p){
+  const el=document.getElementById('wPlan');
+  if(!p.plan){el.innerHTML='<div class="empty">还没有计划草案</div>';return;}
+  const pl=p.plan;
+  let h=`<div class="planfield"><b>要验证</b>${esc(pl.question)}</div>
+    <div class="planfield"><b>具体动作</b>${esc(pl.action)}</div>
+    <div class="planfield"><b>做到算完</b>${esc(pl.accept)}</div>
+    <div class="planfield"><b>投入上限</b>${esc(pl.budget)}</div>
+    <div class="planfield"><b>该停就停</b>${esc(pl.stop)}</div>
+    <div class="planfield"><b>带回证据</b>${esc(pl.evidenceToBring)}</div>
+    <div class="sub" style="margin-top:8px">v${pl.version} ｜ ${pl.author==='ai'?'AI 草案':'你手写'} ｜ ${{draft:'待确认',confirmed:'已确认'}}[pl.status]</div>`;
+  if(pl.status==='draft')h+=`<div class="toolbar"><button class="primary" onclick="confirmPlan()">✅ 确认这个计划，开始执行</button></div>`;
+  el.innerHTML=h;
+}
+function renderExec(p){
+  const el=document.getElementById('wExecList');
+  if(!p.executions.length){el.innerHTML='<div class="empty">还没有执行记录。做完一条，就把真实结果记在这里。</div>';return;}
+  el.innerHTML=p.executions.map(e=>`<div class="exitem"><div class="ea">${esc(e.action)}</div>
+    <div class="em">${e.at.slice(0,16).replace('T',' ')} ｜ 投入:${esc(e.input)||'—'}</div>
+    ${e.result?`<div style="font-size:13px;margin-top:4px">结果:${esc(e.result)}</div>`:''}
+    ${e.evidence?`<div class="ev">证据:${esc(e.evidence)}</div>`:''}
+    ${e.note?`<div class="em">备注:${esc(e.note)}</div>`:''}</div>`).join('');
+}
+
+/* ---- 动作 ---- */
+async function sendMessage(preset){
+  const t=(preset!==undefined?preset:document.getElementById('wInput').value).trim();
+  if(!t){toast('先写点什么');return;}
+  busy(true);
+  try{
+    await api('/api/projects/'+cur.id+'/messages',{text:t,base:curBase});
+    document.getElementById('wInput').value='';
+    const d=await api('/api/projects/'+cur.id);cur=d.project;curBase=cur.version;render();
+  }catch(e){}
+  busy(false);
+}
+async function confirmPlan(){
+  busy(true);
+  try{
+    const d=await api('/api/projects/'+cur.id+'/plan/confirm',{base:curBase});
+    cur=d.project;curBase=cur.version;render();toast('计划已确认,去做,然后把真实结果记下来');
+  }catch(e){}
+  busy(false);
+}
+async function saveExec(){
+  const body={action:document.getElementById('eAction').value,input:document.getElementById('eInput').value,
+    result:document.getElementById('eResult').value,evidence:document.getElementById('eEvidence').value,
+    note:document.getElementById('eNote').value,base:curBase};
+  if(!body.action.trim()){toast('写一下这条记录对应的动作');return;}
+  busy(true);
+  try{
+    const d=await api('/api/projects/'+cur.id+'/executions',body);
+    cur=d.project;curBase=cur.version;render();
+    for(const i of ['eAction','eInput','eResult','eEvidence','eNote'])document.getElementById(i).value='';
+    toast('已记录。证据够了就点「带着结果继续讨论」');
+  }catch(e){}
+  busy(false);
+}
+async function doReview(){
+  busy(true);
+  try{
+    await api('/api/projects/'+cur.id+'/review',{base:curBase});
+    const d=await api('/api/projects/'+cur.id);cur=d.project;curBase=cur.version;render();
+    toast('复盘完成,看左侧讨论区');
+  }catch(e){}
+  busy(false);
+}
+async function decide(type){
+  const label={done:'达成',go:'继续验证',pause:'暂停',stop:'终止'}[type];
+  const reason=prompt('记录「'+label+'」的理由和依据（可引用证据编号）:');
+  if(reason===null)return;
+  busy(true);
+  try{
+    const d=await api('/api/projects/'+cur.id+'/decision',{type,reason:reason||'',base:curBase});
+    cur=d.project;curBase=cur.version;render();toast('已记录结局:'+label);
+  }catch(e){}
+  busy(false);
+}
+
+/* ---- 方法与示例 ---- */
+let methodLoaded=false;
+async function loadMethods(){
+  if(methodLoaded)return;methodLoaded=true;
+  const d=await api('/api/methods');
+  document.getElementById('methodList').innerHTML=d.methods.map(m=>`<button onclick="loadMethod('${esc(m.path)}',this)">${esc(m.title)}</button>`).join('');
+}
+async function loadMethod(p,btn){
+  for(const b of document.querySelectorAll('.mlist button'))b.classList.remove('on');
+  btn.classList.add('on');
+  const d=await api('/api/methods/content?p='+encodeURIComponent(p));
+  document.getElementById('methodTitle').textContent=p;
+  document.getElementById('methodBody').textContent=d.content;
+}
+</script>
+</body>
+</html>
