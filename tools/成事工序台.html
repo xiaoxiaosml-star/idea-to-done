@@ -32,6 +32,7 @@
   .primary{background:var(--wood);color:#fff}
   .ghost{background:#ece5d8;color:var(--ink)}
   .mini{background:#f0ece3;color:var(--muted);font-size:12px;padding:5px 11px}
+  .foldbtn{float:right;font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--wood-lt);border-radius:8px;padding:3px 10px}
   label{display:block;font-size:13px;color:var(--muted);margin:13px 0 5px}
   input[type=text],input[type=number],textarea{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
   textarea{min-height:54px;resize:vertical}
@@ -172,9 +173,9 @@
 
   <!-- 本周安排 -->
   <div class="card">
-    <h2>📅 本周安排 · 把任务卡排进来</h2>
-    <div class="sub" style="margin:0 0 10px">手动分类，不会自动过期——"明天"不会自己变成"今天"，每天过来把卡挪一挪</div>
-    <div class="week">
+    <button class="foldbtn" id="weekFold" onclick="toggleWeek()">展开 ▾</button>
+    <h2>📅 本周安排 <span id="weekCnt" class="sub" style="display:inline;font-size:12px;font-weight:400;margin:0"></span></h2>
+    <div class="week hidden" id="weekBody">
       <div class="col"><h3>☀️ 今天</h3><div id="colToday"></div></div>
       <div class="col"><h3>🌤 明天</h3><div id="colTmr"></div></div>
       <div class="col"><h3>🗓 本周</h3><div id="colWeek"></div></div>
@@ -187,7 +188,7 @@
   <!-- 当前结局 · 常驻, 随时可记 -->
   <div class="card" id="outcomeCard">
     <h2 style="border-left-color:var(--gold)">🎯 当前结局 · 随时如实记录, 不用等全部过关</h2>
-    <div class="sub" style="margin:0 0 10px">想停就停、想暂停就暂停——四种结局都是正经结局, 没有"失败"这个选项</div>
+    <div class="sub" style="margin:0 0 10px">四种结局都是正经结局，没有"失败"这个选项</div>
     <select id="outcomeSel" onchange="setOutcome(this.value)" style="padding:9px 14px;border-radius:9px;border:1.5px solid var(--gold);font-size:14px;background:#fffdf3;font-family:inherit">
       <option value="">—— 这件事现在是什么结局？如实选 ——</option>
       <option value="done">🎯 目标达成：做成了</option>
@@ -212,13 +213,22 @@
     </div>
   </div>
 
-  <div class="toolbar" style="justify-content:center">
-    <button class="mini" onclick="document.getElementById('importFile').click()">导入进度</button>
-    <input type="file" id="importFile" accept=".json" class="hidden" onchange="importJSON(event)">
-    <button class="mini" onclick="clearAll()">清空重来</button>
+  <!-- 数据与备份 -->
+  <div class="card">
+    <button class="foldbtn" id="dataFold" onclick="toggleData()">展开 ▾</button>
+    <h2>💾 数据与备份</h2>
+    <div class="sub" style="margin:0">所有数据只存在你自己的浏览器里，没有任何上传</div>
+    <div id="dataBody" class="hidden" style="margin-top:10px">
+      <div class="toolbar">
+        <button class="ghost" onclick="downloadJSON()">导出进度（JSON）</button>
+        <button class="ghost" onclick="document.getElementById('importFile').click()">导入进度</button>
+        <button class="ghost" onclick="clearAll()">清空重来</button>
+      </div>
+      <input type="file" id="importFile" accept=".json" class="hidden" onchange="importJSON(event)">
+    </div>
   </div>
 
-  <footer>成事工坊 · 成事工序台 v0.2 ｜ 纯前端单机工具，无任何上传 ｜ 方法论全文见仓库 chapters/ 目录</footer>
+  <footer>成事工坊 · 成事工序台 v0.4 ｜ 纯前端单机工具，无任何上传 ｜ 方法论全文见仓库 chapters/ 目录</footer>
 </div>
 
 <!-- 开场引导 -->
@@ -455,7 +465,16 @@ function toggleDone(id){const t=state.tasks.find(x=>x.id===id);t.done=!t.done;if
 function delTask(id){state.tasks=state.tasks.filter(x=>x.id!==id);save();}
 
 /* ===== 排期 ===== */
-function moveSlot(id,slot){const t=state.tasks.find(x=>x.id===id);t.slot=slot;save();}
+function moveSlot(id,slot){const t=state.tasks.find(x=>x.id===id);t.slot=slot;if(slot!=='none')document.getElementById('weekBody').classList.remove('hidden');syncWeekFold();save();}
+function toggleWeek(){document.getElementById('weekBody').classList.toggle('hidden');syncWeekFold();}
+function syncWeekFold(){
+  const h=document.getElementById('weekBody').classList.contains('hidden');
+  document.getElementById('weekFold').textContent=h?'展开 ▾':'收起 ▴';
+}
+function toggleData(){
+  const b=document.getElementById('dataBody');b.classList.toggle('hidden');
+  document.getElementById('dataFold').textContent=b.classList.contains('hidden')?'展开 ▾':'收起 ▴';
+}
 function renderWeek(){
   const cols={today:['colToday','☀️ 今天'],tmr:['colTmr','🌤 明天'],week:['colWeek','🗓 本周']};
   for(const[k,v]of Object.entries(cols)){
@@ -479,6 +498,11 @@ function renderWeek(){
       <button class="mini" onclick="moveSlot(${t.id},'tmr')">明天</button>
       <button class="mini" onclick="moveSlot(${t.id},'week')">本周</button>
     </div>`).join('')+`</div>`:'';
+  const n0=state.tasks.filter(t=>t.slot==='today').length,
+        n1=state.tasks.filter(t=>t.slot==='tmr').length,
+        n2=state.tasks.filter(t=>t.slot==='week').length;
+  document.getElementById('weekCnt').textContent=(n0+n1+n2)>0?`今天 ${n0} · 明天 ${n1} · 本周 ${n2}`:'';
+  syncWeekFold();
 }
 
 /* ===== 自定义工序 ===== */
