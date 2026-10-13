@@ -33,6 +33,12 @@
   .ghost{background:#ece5d8;color:var(--ink)}
   .mini{background:#f0ece3;color:var(--muted);font-size:12px;padding:5px 11px}
   .foldbtn{float:right;font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--wood-lt);border-radius:8px;padding:3px 10px}
+
+  /* ===== 顶部导航: 四个页面 ===== */
+  .topnav{position:sticky;top:0;z-index:20;display:flex;gap:8px;background:var(--bg);padding:12px 0 12px;border-bottom:1.5px solid var(--line);margin-bottom:22px}
+  .topnav button{flex:1;background:transparent;border:1.5px solid var(--line);border-radius:10px;padding:9px 4px;font-size:14.5px;font-weight:600;color:var(--muted)}
+  .topnav button.on{background:var(--wood);border-color:var(--wood);color:#fff}
+  .topnav .bdg{font-size:11px;font-weight:400;margin-left:2px}
   label{display:block;font-size:13px;color:var(--muted);margin:13px 0 5px}
   input[type=text],input[type=number],textarea{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
   textarea{min-height:54px;resize:vertical}
@@ -119,8 +125,18 @@
 <body>
 <div class="wrap">
   <h1><span class="ico">🛠️</span>成事工序台</h1>
-  <div class="sub">成事工坊 · 器 ｜ 一道工序 = 一段方法（图纸）+ 一张任务卡（扳手）｜ 来过一关，成一关 ｜ 数据只存在你自己的浏览器里</div>
+  <div class="sub">成事工坊 · 器 ｜ 一道工序 = 一段方法（图纸）+ 一张任务卡（扳手）｜ 来过一关，成一关</div>
 
+  <!-- 顶部导航: 四个页面 -->
+  <div class="topnav">
+    <button id="navFlow" class="on" onclick="goView('flow')">🧭 工序</button>
+    <button id="navWeek" onclick="goView('week')">📅 本周<span class="bdg" id="navWeekCnt"></span></button>
+    <button id="navOutcome" onclick="goView('outcome')">🎯 结局<span class="bdg" id="navOutcomeBdg"></span></button>
+    <button id="navData" onclick="goView('data')">💾 数据</button>
+  </div>
+
+  <!-- ===== 页一 · 工序: 自诊 + 地图 + 工位 ===== -->
+  <div id="viewFlow">
   <!-- 入口自诊 -->
   <div class="card" style="background:linear-gradient(180deg,#fbf6ec,#f8f2e4)">
     <h2 style="border-left-color:var(--gold)">🔍 你现在是什么状态？点一个，直接带你去该去的地方</h2>
@@ -170,12 +186,15 @@
     </div>
     <div id="taskList"></div>
   </div>
+  </div><!-- /viewFlow -->
 
+  <!-- ===== 页二 · 本周: 排期 ===== -->
+  <div id="viewWeek" class="hidden">
   <!-- 本周安排 -->
   <div class="card">
-    <button class="foldbtn" id="weekFold" onclick="toggleWeek()">展开 ▾</button>
     <h2>📅 本周安排 <span id="weekCnt" class="sub" style="display:inline;font-size:12px;font-weight:400;margin:0"></span></h2>
-    <div class="week hidden" id="weekBody">
+    <div class="sub" style="margin:0 0 10px">手动分类，不会自动过期——"明天"不会自己变成"今天"，每天过来把卡挪一挪</div>
+    <div class="week" id="weekBody">
       <div class="col"><h3>☀️ 今天</h3><div id="colToday"></div></div>
       <div class="col"><h3>🌤 明天</h3><div id="colTmr"></div></div>
       <div class="col"><h3>🗓 本周</h3><div id="colWeek"></div></div>
@@ -184,7 +203,10 @@
 
   <!-- 待排期 -->
   <div id="poolWrap"></div>
+  </div><!-- /viewWeek -->
 
+  <!-- ===== 页三 · 结局 ===== -->
+  <div id="viewOutcome" class="hidden">
   <!-- 当前结局 · 常驻, 随时可记 -->
   <div class="card" id="outcomeCard">
     <h2 style="border-left-color:var(--gold)">🎯 当前结局 · 随时如实记录, 不用等全部过关</h2>
@@ -212,23 +234,23 @@
       <button class="ghost" onclick="downloadJSON()">导出我的进度（JSON）</button>
     </div>
   </div>
+  </div><!-- /viewOutcome -->
 
-  <!-- 数据与备份 -->
+  <!-- ===== 页四 · 数据 ===== -->
+  <div id="viewData" class="hidden">
   <div class="card">
-    <button class="foldbtn" id="dataFold" onclick="toggleData()">展开 ▾</button>
     <h2>💾 数据与备份</h2>
-    <div class="sub" style="margin:0">所有数据只存在你自己的浏览器里，没有任何上传</div>
-    <div id="dataBody" class="hidden" style="margin-top:10px">
-      <div class="toolbar">
-        <button class="ghost" onclick="downloadJSON()">导出进度（JSON）</button>
-        <button class="ghost" onclick="document.getElementById('importFile').click()">导入进度</button>
-        <button class="ghost" onclick="clearAll()">清空重来</button>
-      </div>
-      <input type="file" id="importFile" accept=".json" class="hidden" onchange="importJSON(event)">
+    <div class="sub" style="margin:0 0 10px">所有数据只存在你自己的浏览器里，没有任何上传；换电脑、清浏览器之前，记得先导出 JSON 存档</div>
+    <div class="toolbar">
+      <button class="ghost" onclick="downloadJSON()">导出进度（JSON）</button>
+      <button class="ghost" onclick="document.getElementById('importFile').click()">导入进度</button>
+      <button class="ghost" onclick="clearAll()">清空重来</button>
     </div>
+    <input type="file" id="importFile" accept=".json" class="hidden" onchange="importJSON(event)">
   </div>
+  </div><!-- /viewData -->
 
-  <footer>成事工坊 · 成事工序台 v0.4 ｜ 纯前端单机工具，无任何上传 ｜ 方法论全文见仓库 chapters/ 目录</footer>
+  <footer>成事工坊 · 成事工序台 v0.5 ｜ 纯前端单机工具，无任何上传 ｜ 方法论全文见仓库 chapters/ 目录</footer>
 </div>
 
 <!-- 开场引导 -->
@@ -238,7 +260,7 @@
     <div class="sub" style="margin-bottom:2px">这里不是让你"学"的，是让你"过"的</div>
     <div class="step"><div class="n">1</div><div><div class="tt">点一关，看图纸</div><div class="dd">六个工位是从念头到做成的全部工序，找到你现在卡住的那关</div></div></div>
     <div class="step"><div class="n">2</div><div><div class="tt">填三行，生成任务卡</div><div class="dd">要做的动作 / 做到什么算完 / 什么情况该停——写死再动手</div></div></div>
-    <div class="step"><div class="n">3</div><div><div class="tt">排进今天，做完打勾</div><div class="dd">过一关成一关，全部过完，领一张成事工序卡</div></div></div>
+    <div class="step"><div class="n">3</div><div><div class="tt">排进今天，做完打勾</div><div class="dd">任务卡生成后会自动跳到「本周」页；顶部四个标签——工序 / 本周 / 结局 / 数据，各管一件事</div></div></div>
     <button class="primary" style="width:100%;margin-top:14px;padding:12px" onclick="closeGuide()">好，进工坊干活 →</button>
   </div>
 </div>
@@ -331,7 +353,8 @@ function renderMap(){
   const total=sts.length;
   document.getElementById('totalProg').textContent=`已确认 ${passed}/${total} 个环节 ｜ 任务卡 ${state.tasks.length} 张，完成 ${state.tasks.filter(t=>t.done).length} 张`;
   const cert=document.getElementById('certCard');
-  if(passed===total&&total>0){
+  const certOn=passed===total&&total>0;
+  if(certOn){
     cert.classList.remove('hidden');
     document.getElementById('certNum').textContent=`已确认 ${passed} / ${total} 个环节`;
     const oc={done:'🎯 目标达成',go:'🚀 验证成立·继续',stop:'🛑 理性终止',explore:'🌫 探索中'};
@@ -342,6 +365,7 @@ function renderMap(){
     }).join('');
     restoreOutcome();
   }else cert.classList.add('hidden');
+  document.getElementById('navOutcomeBdg').textContent=certOn?' 🏁':'';
 }
 
 /* ===== 工位 ===== */
@@ -434,7 +458,7 @@ function addTask(){
     stop:document.getElementById('fStop').value.trim(),
     slot:'none',done:false,recon:mode==='recon'});
   ['fAction','fAccept','fStop'].forEach(i=>document.getElementById(i).value='');
-  if(save())toast('⚒ 任务卡已生成，去排进今天');
+  if(save()){toast('⚒ 任务卡已生成，去「本周」排进来');goView('week');}
 }
 function renderTasks(){
   const el=document.getElementById('taskList');el.innerHTML='';
@@ -464,17 +488,18 @@ function saveEv(id,k,v){
 function toggleDone(id){const t=state.tasks.find(x=>x.id===id);t.done=!t.done;if(save()&&t.done)toast('✅ 过一关成一关');}
 function delTask(id){state.tasks=state.tasks.filter(x=>x.id!==id);save();}
 
+/* ===== 页面切换 ===== */
+const VIEWS={flow:'viewFlow',week:'viewWeek',outcome:'viewOutcome',data:'viewData'};
+function goView(v){
+  for(const k in VIEWS){
+    document.getElementById(VIEWS[k]).classList.toggle('hidden',k!==v);
+    document.getElementById('nav'+k[0].toUpperCase()+k.slice(1)).classList.toggle('on',k===v);
+  }
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
 /* ===== 排期 ===== */
-function moveSlot(id,slot){const t=state.tasks.find(x=>x.id===id);t.slot=slot;if(slot!=='none')document.getElementById('weekBody').classList.remove('hidden');syncWeekFold();save();}
-function toggleWeek(){document.getElementById('weekBody').classList.toggle('hidden');syncWeekFold();}
-function syncWeekFold(){
-  const h=document.getElementById('weekBody').classList.contains('hidden');
-  document.getElementById('weekFold').textContent=h?'展开 ▾':'收起 ▴';
-}
-function toggleData(){
-  const b=document.getElementById('dataBody');b.classList.toggle('hidden');
-  document.getElementById('dataFold').textContent=b.classList.contains('hidden')?'展开 ▾':'收起 ▴';
-}
+function moveSlot(id,slot){const t=state.tasks.find(x=>x.id===id);t.slot=slot;save();}
 function renderWeek(){
   const cols={today:['colToday','☀️ 今天'],tmr:['colTmr','🌤 明天'],week:['colWeek','🗓 本周']};
   for(const[k,v]of Object.entries(cols)){
@@ -502,7 +527,7 @@ function renderWeek(){
         n1=state.tasks.filter(t=>t.slot==='tmr').length,
         n2=state.tasks.filter(t=>t.slot==='week').length;
   document.getElementById('weekCnt').textContent=(n0+n1+n2)>0?`今天 ${n0} · 明天 ${n1} · 本周 ${n2}`:'';
-  syncWeekFold();
+  document.getElementById('navWeekCnt').textContent=(n0+n1+n2)>0?` ${n0+n1+n2}张`:'';
 }
 
 /* ===== 自定义工序 ===== */
