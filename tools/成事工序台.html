@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>成事工序台 · 成事工坊</title>
+<style>
+  :root{
+    --bg:#f5f1ea;            /* 工坊纸底 */
+    --panel:#fffdf9;
+    --ink:#2b2620;
+    --muted:#8a8177;
+    --line:#e3dccc;
+    --wood:#8b5e34;          /* 木色主调 */
+    --wood-lt:#c9a877;
+    --accent:#2f5aa8;
+    --ok:#2e7d4f;
+    --gold:#b7791f;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.7;
+       background-image:radial-gradient(circle at 20% 10%,#fdf9f0 0%,transparent 55%)}
+  .wrap{max-width:980px;margin:0 auto;padding:34px 20px 90px}
+  h1{font-size:24px;margin-bottom:4px;letter-spacing:1px}
+  h1 .ico{margin-right:8px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin-bottom:20px;
+        box-shadow:0 1px 3px rgba(80,60,30,.06)}
+  .card h2{font-size:16px;margin-bottom:14px;padding-left:10px;border-left:5px solid var(--wood)}
+  button{padding:9px 18px;border:0;border-radius:8px;font-size:13.5px;cursor:pointer;font-family:inherit;transition:.15s}
+  button:hover{transform:translateY(-1px)}
+  .primary{background:var(--wood);color:#fff}
+  .ghost{background:#ece5d8;color:var(--ink)}
+  .mini{background:#f0ece3;color:var(--muted);font-size:12px;padding:5px 11px}
+  label{display:block;font-size:13px;color:var(--muted);margin:13px 0 5px}
+  input[type=text],input[type=number],textarea{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
+  textarea{min-height:54px;resize:vertical}
+  .chk{width:18px;height:18px;cursor:pointer;accent-color:var(--wood);flex-shrink:0;margin-top:3px}
+
+  /* ===== 流水线地图 ===== */
+  .line{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:10px 4px 4px}
+  .node{flex:1;min-width:118px;position:relative;text-align:center;cursor:pointer;padding:0 6px}
+  .node .box{background:var(--panel);border:2px solid var(--line);border-radius:12px;padding:14px 8px 12px;position:relative;transition:.18s}
+  .node:hover .box{border-color:var(--wood-lt);transform:translateY(-3px)}
+  .node.on .box{border-color:var(--wood);box-shadow:0 4px 14px rgba(139,94,52,.18)}
+  .node .no{font-size:11px;color:var(--muted);letter-spacing:1px}
+  .node .nm{font-size:15.5px;font-weight:700;margin:3px 0 4px}
+  .node .em{font-size:20px}
+  .node .pg{font-size:11px;color:var(--muted)}
+  .node.passed .box{border-color:var(--ok)}
+  .node.passed .pg{color:var(--ok);font-weight:600}
+  .stamp{position:absolute;top:-12px;right:-8px;background:var(--ok);color:#fff;font-size:10.5px;border-radius:12px;padding:2px 9px;
+         display:none;transform:rotate(8deg);box-shadow:0 2px 5px rgba(0,0,0,.2);letter-spacing:2px}
+  .node.passed .stamp{display:block;animation:stampIn .4s ease}
+  @keyframes stampIn{0%{transform:rotate(8deg) scale(2.2);opacity:0}70%{transform:rotate(8deg) scale(.92);opacity:1}100%{transform:rotate(8deg) scale(1)}}
+  .conn{width:26px;align-self:center;color:var(--wood-lt);font-size:18px;flex-shrink:0;text-align:center;padding-bottom:20px}
+  .addnode{flex-shrink:0;align-self:center;margin-left:8px}
+  .addnode .box{border-style:dashed;color:var(--muted);background:transparent}
+
+  /* ===== 工位 ===== */
+  .blueprint{background:linear-gradient(180deg,#fbf6ec,#f8f2e4);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:12px 0;font-size:14px}
+  .blueprint b.t{display:block;margin-bottom:6px;color:var(--wood);font-size:13px;letter-spacing:2px}
+  .bp-item{display:flex;gap:9px;align-items:flex-start;padding:6px 0;border-bottom:1px dashed var(--line);cursor:pointer}
+  .bp-item:last-child{border-bottom:0}
+  .bp-item .tx{flex:1;transition:.15s}
+  .bp-item.checked .tx{color:var(--muted);text-decoration:line-through}
+  .bp-bar{height:6px;background:#efe9db;border-radius:4px;margin-top:10px;overflow:hidden}
+  .bp-bar i{display:block;height:100%;background:var(--wood-lt);border-radius:4px;transition:.3s}
+
+  .task{border:1px solid var(--line);border-left:5px solid var(--wood);border-radius:10px;padding:13px 16px;margin-top:13px;background:#fff}
+  .task .a{font-size:14.5px;font-weight:600}
+  .task .meta{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .task .ops{display:flex;gap:6px;margin-top:9px}
+  .task.done{border-left-color:var(--ok);opacity:.6;background:#fbfdfb}
+  .task.done .a{text-decoration:line-through}
+
+  /* ===== 本周安排 ===== */
+  .week{display:flex;gap:13px;flex-wrap:wrap}
+  .col{flex:1;min-width:210px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px;min-height:90px}
+  .col h3{font-size:13px;color:var(--muted);margin-bottom:9px;display:flex;align-items:center;gap:6px}
+  .col .item{font-size:13px;border-bottom:1px dashed var(--line);padding:7px 0;display:flex;gap:9px;align-items:flex-start}
+  .col .item:last-child{border-bottom:0}
+  .col .empty{font-size:12px;color:var(--muted);text-align:center;padding:16px 0}
+  .src{font-size:11px;color:var(--gold);white-space:nowrap;background:#faf3e3;border-radius:6px;padding:1px 6px}
+
+  /* ===== 待排期 ===== */
+  .pool .item{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+  .pool .item:last-child{border-bottom:0}
+  .pool .item .sp{flex:1}
+
+  /* ===== 成事工序卡 ===== */
+  .cert{border:2.5px solid var(--gold);border-radius:14px;padding:26px 22px;text-align:center;
+        background:linear-gradient(180deg,#fffdf3,#fff);position:relative;overflow:hidden}
+  .cert:before{content:"";position:absolute;inset:6px;border:1px solid var(--gold);border-radius:10px;opacity:.4;pointer-events:none}
+  .cert h2{border:0;padding:0;color:var(--gold);font-size:21px;letter-spacing:6px}
+  .cert .big{font-size:38px;font-weight:800;margin:8px 0 2px}
+  .cert .rows{font-size:13.5px;text-align:left;margin:14px auto 0;max-width:440px}
+  .cert .rows div{padding:4px 0;border-bottom:1px dashed var(--line);display:flex;justify-content:space-between}
+  .cert .seal{position:absolute;bottom:14px;right:16px;width:64px;height:64px;border:2.5px solid var(--ok);border-radius:50%;
+        color:var(--ok);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;text-align:center;
+        transform:rotate(-14deg);opacity:.85;line-height:1.3}
+
+  .toolbar{display:flex;gap:9px;margin:15px 0;flex-wrap:wrap}
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 20px;border-radius:9px;font-size:13px;display:none;z-index:99;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+  footer{margin-top:34px;font-size:12px;color:var(--muted);text-align:center}
+
+  /* ===== 开场引导 ===== */
+  .mask{position:fixed;inset:0;background:rgba(30,24,16,.55);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px}
+  .guide{background:var(--panel);border-radius:16px;max-width:460px;width:100%;padding:28px 26px;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+  .guide h2{border:0;padding:0;font-size:19px;margin-bottom:4px;color:var(--wood)}
+  .guide .step{display:flex;gap:12px;margin:16px 0;align-items:flex-start}
+  .guide .step .n{width:26px;height:26px;border-radius:50%;background:var(--wood);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+  .guide .step .tt{font-weight:600;font-size:14.5px}
+  .guide .step .dd{font-size:13px;color:var(--muted)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="ico">🛠️</span>成事工序台</h1>
+  <div class="sub">成事工坊 · 器 ｜ 一道工序 = 一段方法（图纸）+ 一张任务卡（扳手）｜ 来过一关，成一关 ｜ 数据只存在你自己的浏览器里</div>
+
+  <!-- 入口自诊 -->
+  <div class="card" style="background:linear-gradient(180deg,#fbf6ec,#f8f2e4)">
+    <h2 style="border-left-color:var(--gold)">🔍 你现在是什么状态？点一个，直接带你去该去的地方</h2>
+    <div class="toolbar" style="margin:4px 0 0">
+      <button class="primary" onclick="triage('recon')">🌫 完全没概念<br><span style="font-size:11px;font-weight:400">想做事，但不知道做成什么样</span></button>
+      <button class="ghost" onclick="triage('wish')">💭 有模糊愿望<br><span style="font-size:11px;font-weight:400">说得出口，但还没验证过</span></button>
+      <button class="ghost" onclick="triage('stuck')">🧱 已开工但卡住<br><span style="font-size:11px;font-weight:400">动过手了，现在卡在某一步</span></button>
+    </div>
+    <div class="sub" id="triageHint" style="margin:10px 0 0"></div>
+  </div>
+
+  <!-- 流水线地图 -->
+  <div class="card">
+    <h2>工序流水线 · 六个工位不必按顺序，卡在哪就点哪</h2>
+    <div class="line" id="map"></div>
+    <div class="sub" id="totalProg" style="margin:8px 0 0"></div>
+    <div class="toolbar" style="margin:10px 0 0">
+      <button class="mini" onclick="openBench('s4')">🫀 心态有点崩？不进流水线，直接去心态续航</button>
+    </div>
+  </div>
+
+  <!-- 工位 -->
+  <div class="card hidden" id="bench">
+    <h2 id="benchTitle"></h2>
+    <div class="blueprint">
+      <b class="t">📐 本关图纸 · 看完一条勾一条</b>
+      <div id="bpList"></div>
+      <div class="bp-bar"><i id="bpBar" style="width:0%"></i></div>
+    </div>
+    <div style="background:#fbf6ec;border:1px dashed var(--wood-lt);border-radius:10px;padding:13px 16px;margin:14px 0" id="forkBox">
+      <b style="font-size:13.5px">开工前先回答：这事做成是什么样，你心里清楚吗？</b>
+      <div class="toolbar" style="margin:9px 0 0">
+        <button id="mKnow" class="primary" onclick="setMode('know')">清楚，直接写标准</button>
+        <button id="mRecon" class="ghost" onclick="setMode('recon')">还没概念，先去探路</button>
+      </div>
+      <div id="modeHint" style="font-size:12.5px;color:var(--muted);margin-top:8px"></div>
+    </div>
+    <label id="lAction">🔧 这一关我要做的动作（一句话，能今天就开干的）</label>
+    <input type="text" id="fAction">
+    <label id="lAccept">✔ 做到什么程度算完（写得出"检查过了"的标准）</label>
+    <input type="text" id="fAccept">
+    <label id="lStop">⛔ 出现什么结果该停（止损线，不写"再想想"）</label>
+    <input type="text" id="fStop">
+    <div class="toolbar">
+      <button class="primary" onclick="addTask()">⚒ 生成任务卡</button>
+      <button class="ghost" onclick="closeBench()">收起本关</button>
+    </div>
+    <div id="taskList"></div>
+  </div>
+
+  <!-- 本周安排 -->
+  <div class="card">
+    <h2>📅 本周安排 · 把任务卡排进来</h2>
+    <div class="sub" style="margin:0 0 10px">手动分类，不会自动过期——"明天"不会自己变成"今天"，每天过来把卡挪一挪</div>
+    <div class="week">
+      <div class="col"><h3>☀️ 今天</h3><div id="colToday"></div></div>
+      <div class="col"><h3>🌤 明天</h3><div id="colTmr"></div></div>
+      <div class="col"><h3>🗓 本周</h3><div id="colWeek"></div></div>
+    </div>
+  </div>
+
+  <!-- 待排期 -->
+  <div id="poolWrap"></div>
+
+  <!-- 当前结局 · 常驻, 随时可记 -->
+  <div class="card" id="outcomeCard">
+    <h2 style="border-left-color:var(--gold)">🎯 当前结局 · 随时如实记录, 不用等全部过关</h2>
+    <div class="sub" style="margin:0 0 10px">想停就停、想暂停就暂停——四种结局都是正经结局, 没有"失败"这个选项</div>
+    <select id="outcomeSel" onchange="setOutcome(this.value)" style="padding:9px 14px;border-radius:9px;border:1.5px solid var(--gold);font-size:14px;background:#fffdf3;font-family:inherit">
+      <option value="">—— 这件事现在是什么结局？如实选 ——</option>
+      <option value="done">🎯 目标达成：做成了</option>
+      <option value="go">🚀 验证成立：继续推进</option>
+      <option value="stop">🛑 理性终止：排除了一个错误选项</option>
+      <option value="explore">🌫 还在探索：概念越来越清</option>
+    </select>
+    <div id="outcomeTxt" style="font-size:13px;color:var(--muted);margin-top:9px"></div>
+  </div>
+
+  <!-- 工序卡 -->
+  <div class="card hidden" id="certCard">
+    <div class="cert">
+      <div class="seal">成事<br>工坊</div>
+      <h2>成事工序卡</h2>
+      <div class="big" id="certNum"></div>
+      <div id="certOutcome" style="font-size:13px;color:var(--gold);margin-top:10px;font-weight:600"></div>
+      <div class="rows" id="certRows"></div>
+    </div>
+    <div class="toolbar" style="justify-content:center">
+      <button class="ghost" onclick="downloadJSON()">导出我的进度（JSON）</button>
+    </div>
+  </div>
+
+  <div class="toolbar" style="justify-content:center">
+    <button class="mini" onclick="document.getElementById('importFile').click()">导入进度</button>
+    <input type="file" id="importFile" accept=".json" class="hidden" onchange="importJSON(event)">
+    <button class="mini" onclick="clearAll()">清空重来</button>
+  </div>
+
+  <footer>成事工坊 · 成事工序台 v0.2 ｜ 纯前端单机工具，无任何上传 ｜ 方法论全文见仓库 chapters/ 目录</footer>
+</div>
+
+<!-- 开场引导 -->
+<div class="mask" id="guideMask">
+  <div class="guide">
+    <h2>第一次来？30 秒看懂</h2>
+    <div class="sub" style="margin-bottom:2px">这里不是让你"学"的，是让你"过"的</div>
+    <div class="step"><div class="n">1</div><div><div class="tt">点一关，看图纸</div><div class="dd">六个工位是从念头到做成的全部工序，找到你现在卡住的那关</div></div></div>
+    <div class="step"><div class="n">2</div><div><div class="tt">填三行，生成任务卡</div><div class="dd">要做的动作 / 做到什么算完 / 什么情况该停——写死再动手</div></div></div>
+    <div class="step"><div class="n">3</div><div><div class="tt">排进今天，做完打勾</div><div class="dd">过一关成一关，全部过完，领一张成事工序卡</div></div></div>
+    <button class="primary" style="width:100%;margin-top:14px;padding:12px" onclick="closeGuide()">好，进工坊干活 →</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const STATIONS=[
+ {id:'s0',no:'第零关',em:'💡',name:'念头检定',fork:true,bp:['这事有验收标准吗？说不出"怎样算做成"，就不是事，是愿望','最坏结果写出来并标上数字，亏得起才往下走','说不清它具体改变什么生活？先别定性：可能是别人的愿望，也可能只是还没见过真做成的人——去探路；探完路还无感，才打回'],
+  ex:{a:'例：把这个念头写成一句话——我要在多长时间内，做到什么具体结果',acc:'例：这句话里有时间、有标准，念给一个朋友听，他能原样复述出来',stop:'例：写不出"怎样算做成"→ 它只是愿望，先放回愿望清单，不占工位'}},
+ {id:'s1',no:'第一关',em:'🧭',name:'方向选择',bp:['方向只有两种走法：加盟别人的系统 / 自己干（模式维度的大方向，具体走法看 chapters/02 全文）','先列 3 个你看得见真人在做的方向，不许想空中楼阁','每个方向写一句代价，选你能付得起的那种'],
+  ex:{a:'例：列出 3 个我看得见真人在做的方向，各写一句要付的代价',acc:'例：3 个方向各有一句具体代价，写在纸上，不是脑子里',stop:'例：想了一周还列不出 3 个 → 先去做份兼职攒见识，这关暂缓，不算失败'}},
+ {id:'s2',no:'第二关',em:'🪓',name:'目标拆解',bp:['把目标拆到"拆不动"为止——明天就能做的那一步','每一步配一个方案，方案不是愿望，是有动作的通知单','方案没用就换，不换目标轻易，换的是到达的路'],
+  ex:{a:'例：把目标拆到明天就能做的第一步，小到不能再拆',acc:'例：第一步 30 分钟能做完，且做完后知道下一步是什么',stop:'例：拆不出第一步 → 目标还是口号，回第零关重新检定'}},
+ {id:'s3',no:'第三关',em:'🔁',name:'动手迭代',bp:['先做起来，错了改、对了继续','每轮动手前写好止损线，按线执行，不临场改主意','出现正反馈就加码，加码也按事先写的条件来'],
+  ex:{a:'例：按拆好的第一步真去做一轮，把结果原样记下来',acc:'例：这一轮做完了，手里有一个真实结果——成了败了都算数',stop:'例：触到事前写的止损线 → 按线停，不许临场改主意'}},
+ {id:'s4',no:'第四关',em:'🫀',name:'心态续航',bp:['心态不是前提，是经营对象——崩了不等于完了','写下现在的情绪，它就从脑子里的雾变成纸上的字','状态差的时候只做最小动作：打开本子、写一行、发一条'],
+  ex:{a:'例：把现在最堵的那口气写成一句话，不修饰',acc:'例：写完了，并给自己排了一个 10 分钟内能做的最小动作',stop:'例：情绪连着一周影响睡觉 → 先处理人，事放一放——这不是放弃，是止损'}},
+ {id:'s5',no:'第五关',em:'🏁',name:'做成复盘',bp:['把做成的路径记下来：哪几步是真关键的','转折点各写一句"当时幸亏做了什么"','这份复盘是你下次成事的生产线图纸'],
+  ex:{a:'例：把做成的过程按顺序写下来，标出最关键的 3 步',acc:'例：写完读一遍，别人照着这份记录能重走一遍',stop:'例：写不出关键点 → 去找当时的原始记录，不凭记忆编'}}
+];
+
+let state=load();
+let cur=null;
+let mode='know';
+
+function validState(s){
+  if(!s||!Array.isArray(s.tasks))return false;
+  for(const t of s.tasks){if(!t||typeof t!=='object'||typeof t.a!=='string'||typeof t.st!=='string'||typeof t.id!=='number')return false;}
+  if(s.custom!==undefined){
+    if(!Array.isArray(s.custom))return false;
+    for(const c of s.custom){if(!c||typeof c!=='object'||typeof c.id!=='string'||typeof c.name!=='string'||!Array.isArray(c.bp))return false;
+      for(const b of c.bp){if(typeof b!=='string')return false;}}
+  }
+  if(s.bp!==undefined){
+    if(!s.bp||typeof s.bp!=='object'||Array.isArray(s.bp))return false;
+    for(const k of Object.keys(s.bp)){const v=s.bp[k];
+      if(!Array.isArray(v))return false;
+      for(const i of v){if(typeof i!=='number'||i<0||i%1!==0)return false;}}
+  }
+  return true;
+}
+function load(){
+  try{
+    const raw=localStorage.getItem('gsc_state');
+    if(!raw)return {tasks:[],custom:[],bp:{},outcome:''};
+    const s=JSON.parse(raw);
+    if(validState(s)){if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(s.outcome===undefined)s.outcome='';return s;}
+    localStorage.removeItem('gsc_state');
+  }catch(e){localStorage.removeItem('gsc_state');}
+  return {tasks:[],custom:[],bp:{},outcome:''};
+}
+function persist(){
+  try{localStorage.setItem('gsc_state',JSON.stringify(state));return true;}
+  catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}
+}
+function save(){
+  const ok=persist();
+  renderAll();
+  return ok;
+}
+const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',1700);}
+function allStations(){return STATIONS.concat(state.custom);}
+function stName(id){const s=allStations().find(x=>x.id===id);return s?s.name:'?';}
+
+/* ===== 地图 ===== */
+function renderMap(){
+  const el=document.getElementById('map');el.innerHTML='';
+  let passed=0;
+  const sts=allStations();
+  sts.forEach((s,i)=>{
+    const tasks=state.tasks.filter(t=>t.st===s.id);
+    const doneAll=tasks.filter(t=>t.done).length;
+    const done=tasks.filter(t=>t.done&&t.evidence).length;
+    if(done>0)passed++;
+    const d=document.createElement('div');
+    d.className='node'+(cur===s.id?' on':'')+(done>0?' passed':'');
+    d.innerHTML=`<div class="box"><span class="stamp">已确认</span><div class="em">${esc(s.em||'📌')}</div><div class="no">${esc(s.no)}</div><div class="nm">${esc(s.name)}</div><div class="pg">${doneAll}/${tasks.length} 卡${doneAll>done?' · 缺证据':''}</div></div>`;
+    d.onclick=()=>openBench(s.id);
+    el.appendChild(d);
+    if(i<sts.length-1){const c=document.createElement('div');c.className='conn';c.textContent='→';el.appendChild(c);}
+  });
+  const add=document.createElement('div');
+  add.className='node addnode';
+  add.innerHTML=`<div class="box" style="padding:18px 10px"><div class="em">➕</div><div class="nm" style="font-size:13px;color:var(--muted)">加一道<br>自己的工序</div></div>`;
+  add.onclick=addStation;
+  el.appendChild(add);
+
+  const total=sts.length;
+  document.getElementById('totalProg').textContent=`已确认 ${passed}/${total} 个环节 ｜ 任务卡 ${state.tasks.length} 张，完成 ${state.tasks.filter(t=>t.done).length} 张`;
+  const cert=document.getElementById('certCard');
+  if(passed===total&&total>0){
+    cert.classList.remove('hidden');
+    document.getElementById('certNum').textContent=`已确认 ${passed} / ${total} 个环节`;
+    const oc={done:'🎯 目标达成',go:'🚀 验证成立·继续',stop:'🛑 理性终止',explore:'🌫 探索中'};
+    document.getElementById('certOutcome').textContent='当前结局：'+(oc[state.outcome]||'未填写');
+    document.getElementById('certRows').innerHTML=sts.map(s=>{
+      const d=state.tasks.filter(t=>t.st===s.id&&t.done&&t.evidence).length;
+      return `<div><span>${esc(s.no)} · ${esc(s.name)}</span><span>${d>0?'✅ 已过':'· · ·'}</span></div>`;
+    }).join('');
+    restoreOutcome();
+  }else cert.classList.add('hidden');
+}
+
+/* ===== 工位 ===== */
+function openBench(id,m){
+  cur=id;const s=allStations().find(x=>x.id===id);
+  document.getElementById('bench').classList.remove('hidden');
+  document.getElementById('benchTitle').textContent=`${s.em||''} ${s.no}｜${s.name}`;
+  document.getElementById('forkBox').style.display=s.fork?'':'none';
+  renderBp();renderTasks();setMode((s.fork?m:null)||'know',s);
+  renderMap();
+  document.getElementById('bench').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+/* 入口自诊 */
+function triage(kind){
+  const hint=document.getElementById('triageHint');
+  if(kind==='recon'){
+    hint.textContent='→ 送你到第零关"念头检定"，已帮你切到"探路模式"：先去看真人真事，拿到参照物再写标准。';
+    openBench('s0','recon');
+  }else if(kind==='wish'){
+    hint.textContent='→ 送你到第零关"念头检定"：把愿望写成一句话，补上验收标准。';
+    openBench('s0','know');
+  }else{
+    hint.textContent='→ 别管关卡的顺序，流水线就在下面：卡在哪个环节，就点哪个工位。心态崩了随时点上面的"心态续航"。';
+    document.getElementById('map').scrollIntoView({behavior:'smooth',block:'center'});
+  }
+}
+
+const MODE_TXT={
+ know:{
+  hint:'知道做成什么样，就把标准写死再动手——防止干着干着变形。',
+  la:'🔧 这一关我要做的动作（一句话，能今天就开干的）',
+  lc:'✔ 做到什么程度算完（写得出"检查过了"的标准）',
+  ls:'⛔ 出现什么结果该停（止损线，不写"再想想"）'},
+ recon:{
+  hint:'没概念很正常——预期不是想出来的，是探出来的。先去看真人真事，拿到参照物，再回来写标准。',
+  la:'🧭 去探路：我要去看 / 问 / 试什么（找一个真实参照物）',
+  lc:'✔ 探到什么程度算完（目标是拿到概念，不是拿到结果）',
+  ls:'⛔ 什么情况说明这事还不存在（止损线）'}
+};
+function setMode(m,s){
+  mode=m;s=s||allStations().find(x=>x.id===cur);
+  const ex=s.ex||{a:'例：这一步具体到 30 分钟内能开干',acc:'例：做完后有一个看得见的结果',stop:'例：触到线就停，不临场改主意'};
+  const ph=m==='know'?ex:{a:'例：去问一个做过这事的人最真实的数字；或去看 3 个真人在做的人',
+    acc:'例：我能用自己的话说出这事真实的样子，手里至少有一个真实数字',
+    stop:'例：找不到任何真人真事作参照 → 这事目前只在想象里，先放回愿望清单'};
+  document.getElementById('mKnow').className=m==='know'?'primary':'ghost';
+  document.getElementById('mRecon').className=m==='recon'?'primary':'ghost';
+  document.getElementById('modeHint').textContent=MODE_TXT[m].hint;
+  document.getElementById('lAction').textContent=MODE_TXT[m].la;
+  document.getElementById('lAccept').textContent=MODE_TXT[m].lc;
+  document.getElementById('lStop').textContent=MODE_TXT[m].ls;
+  document.getElementById('fAction').placeholder=ph.a;
+  document.getElementById('fAccept').placeholder=ph.acc;
+  document.getElementById('fStop').placeholder=ph.stop;
+}
+function closeBench(){cur=null;document.getElementById('bench').classList.add('hidden');renderMap();}
+
+function renderBp(){
+  const s=allStations().find(x=>x.id===cur);
+  const checked=(state.bp[cur]||[]);
+  const el=document.getElementById('bpList');el.innerHTML='';
+  s.bp.forEach((b,i)=>{
+    const d=document.createElement('div');
+    d.className='bp-item'+(checked.includes(i)?' checked':'');
+    d.innerHTML=`<input type="checkbox" class="chk" ${checked.includes(i)?'checked':''} onchange="toggleBp(${i})"><span class="tx">${esc(b)}</span>`;
+    el.appendChild(d);
+  });
+  const pct=s.bp.length?checked.length/s.bp.length*100:0;
+  document.getElementById('bpBar').style.width=pct+'%';
+}
+function toggleBp(i){
+  const arr=state.bp[cur]||(state.bp[cur]=[]);
+  const k=arr.indexOf(i);
+  if(k>=0)arr.splice(k,1);else arr.push(i);
+  save();renderBp();
+}
+
+function addTask(){
+  const a=document.getElementById('fAction').value.trim();
+  if(!a){toast('先写"要做的动作"');return;}
+  state.tasks.push({id:Date.now(),st:cur,a,
+    accept:document.getElementById('fAccept').value.trim(),
+    stop:document.getElementById('fStop').value.trim(),
+    slot:'none',done:false,recon:mode==='recon'});
+  ['fAction','fAccept','fStop'].forEach(i=>document.getElementById(i).value='');
+  if(save())toast('⚒ 任务卡已生成，去排进今天');
+}
+function renderTasks(){
+  const el=document.getElementById('taskList');el.innerHTML='';
+  const list=state.tasks.filter(t=>t.st===cur);
+  list.forEach(t=>{
+    const d=document.createElement('div');d.className='task'+(t.done?' done':'');
+    d.innerHTML=`<div class="a"><input type="checkbox" class="chk" ${t.done?'checked':''} onchange="toggleDone(${t.id})"> ${t.recon?'<span class="src" style="background:#eef4ec;color:var(--ok)">🧭 探路</span> ':''}${esc(t.a)}</div>
+      ${t.accept?`<div class="meta">✔ 算完：${esc(t.accept)}</div>`:''}
+      ${t.stop?`<div class="meta">⛔ 该停：${esc(t.stop)}</div>`:''}
+      ${t.done&&!t.evidence?`<div class="meta" style="color:var(--warn)">⚠️ 写下证据，这关才算过</div>`:''}
+      <div class="ops"><button class="mini" onclick="delTask(${t.id})">删</button></div>
+      ${t.done?`<div style="margin-top:9px;background:#f2f8f2;border:1px dashed #c8dcc8;border-radius:8px;padding:9px 11px">
+        <div style="font-size:12px;color:var(--ok);font-weight:600;margin-bottom:4px">📥 结果回收 · 干完不算完，证据才算</div>
+        <input type="text" style="font-size:12.5px;padding:6px 9px;margin-top:3px" placeholder="拿到了什么证据？（真实数字 / 原话 / 观察记录）" value="${esc(t.evidence)}" oninput="saveEv(${t.id},'evidence',this.value)">
+        <input type="text" style="font-size:12.5px;padding:6px 9px;margin-top:5px" placeholder="原来的假设要不要改？改成什么？" value="${esc(t.revise)}" oninput="saveEv(${t.id},'revise',this.value)">
+      </div>`:''}`;
+    el.appendChild(d);
+  });
+  if(!list.length)el.innerHTML='<div class="sub" style="margin-top:12px">本关还没有任务卡，按图纸写一张</div>';
+}
+function saveEv(id,k,v){
+  const t=state.tasks.find(x=>x.id===id);if(!t)return;
+  t[k]=v.trim();
+  renderMap();
+  if(persist())toast('已记录');
+}
+function toggleDone(id){const t=state.tasks.find(x=>x.id===id);t.done=!t.done;if(save()&&t.done)toast('✅ 过一关成一关');}
+function delTask(id){state.tasks=state.tasks.filter(x=>x.id!==id);save();}
+
+/* ===== 排期 ===== */
+function moveSlot(id,slot){const t=state.tasks.find(x=>x.id===id);t.slot=slot;save();}
+function renderWeek(){
+  const cols={today:['colToday','☀️ 今天'],tmr:['colTmr','🌤 明天'],week:['colWeek','🗓 本周']};
+  for(const[k,v]of Object.entries(cols)){
+    const el=document.getElementById(v[0]);el.innerHTML='';
+    const list=state.tasks.filter(t=>t.slot===k);
+    if(!list.length){el.innerHTML='<div class="empty">还没卡排进来</div>';continue;}
+    list.forEach(t=>{
+      const d=document.createElement('div');d.className='item';
+      d.innerHTML=`<input type="checkbox" class="chk" ${t.done?'checked':''} onchange="toggleDone(${t.id})">
+        <div style="flex:1"><span style="${t.done?'text-decoration:line-through;color:var(--muted)':''}">${esc(t.a)}</span>
+        <div style="font-size:11px;margin-top:2px"><span class="src">${esc(stName(t.st))}</span>
+        <button class="mini" style="margin-left:6px" onclick="moveSlot(${t.id},'none')">移出</button></div></div>`;
+      el.appendChild(d);
+    });
+  }
+  const pool=state.tasks.filter(t=>t.slot==='none');
+  const pw=document.getElementById('poolWrap');
+  pw.innerHTML=pool.length?`<div class="card pool"><h2>🧰 待排期任务卡</h2>`+
+    pool.map(t=>`<div class="item"><span class="sp">${esc(t.a)} <span class="src">${esc(stName(t.st))}</span></span>
+      <button class="mini" onclick="moveSlot(${t.id},'today')">今天</button>
+      <button class="mini" onclick="moveSlot(${t.id},'tmr')">明天</button>
+      <button class="mini" onclick="moveSlot(${t.id},'week')">本周</button>
+    </div>`).join('')+`</div>`:'';
+}
+
+/* ===== 自定义工序 ===== */
+function addStation(){
+  const name=prompt('给你的工序起个名（例：选岗对比 / 作品集准备）：');
+  if(!name||!name.trim())return;
+  const bpIn=prompt('这道工序看哪几条？用 / 分开（例：列出3个候选/各写一句代价/选付得起的）');
+  const bps=(bpIn||'想清楚再动手').split('/').map(x=>x.trim()).filter(Boolean);
+  state.custom.push({id:'c'+Date.now(),no:'自定义',em:'📌',name:name.trim(),bp:bps.length?bps:['想清楚再动手']});
+  if(save())toast('已加上自己的工序');
+}
+
+/* ===== 导入导出 ===== */
+function downloadJSON(){
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='成事工序台_进度.json';a.click();toast('已导出');
+}
+function importJSON(e){
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    let s=null;try{s=JSON.parse(r.result);}catch(err){toast('文件不是有效 JSON，未导入');e.target.value='';return;}
+    if(validState(s)){
+      if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(s.outcome===undefined)s.outcome='';
+      state=s;if(save())toast('进度已导入');
+    }else toast('文件结构不对，未导入（当前进度未受影响）');
+    e.target.value='';
+  };
+  r.readAsText(f);
+}
+function clearAll(){
+  if(!confirm('确定清空所有工序和任务卡？不可恢复（可先导出备份）。'))return;
+  state={tasks:[],custom:[],bp:{},outcome:''};cur=null;
+  document.getElementById('bench').classList.add('hidden');
+  if(save())toast('已清空');
+}
+
+/* ===== 结局制 ===== */
+const OUTCOME_TXT={
+ done:'从念头到做成，每一步都有记录。这份工序卡，是你下一次成事的生产线图纸。',
+ go:'验证成立，继续推进。回流水线，带着证据进下一关。',
+ stop:'按止损线理性终止——排除一个错误选项，和做成一件事一样值钱。这不叫失败，这叫成事。',
+ explore:'概念越来越清。探路本身就是进展，参照物会把你带到下一关。'
+};
+function setOutcome(v){
+  state.outcome=v;
+  document.getElementById('outcomeTxt').textContent=v?OUTCOME_TXT[v]:'';
+  const oc={done:'目标达成',go:'验证成立·继续',stop:'理性终止',explore:'探索中'};
+  document.getElementById('certOutcome').textContent='当前结局：'+(oc[v]||'未填写');
+  persist();
+}
+function restoreOutcome(){
+  const sel=document.getElementById('outcomeSel');
+  if(sel){sel.value=state.outcome||'';document.getElementById('outcomeTxt').textContent=state.outcome?OUTCOME_TXT[state.outcome]:'';}
+}
+
+/* ===== 引导 ===== */
+function closeGuide(){document.getElementById('guideMask').style.display='none';localStorage.setItem('gsc_seen','1');}
+if(localStorage.getItem('gsc_seen'))document.getElementById('guideMask').style.display='none';
+
+function renderAll(){renderMap();if(cur){renderBp();renderTasks();}renderWeek();restoreOutcome();}
+renderAll();
+</script>
+</body>
+</html>

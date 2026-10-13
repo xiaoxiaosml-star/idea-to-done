@@ -114,6 +114,7 @@ const STORE_KEY="roadbook-validation-sheet-v2";
 const LEGACY_KEY="roadbook-validation-sheet";
 let migratedNote="";
 function val(id){return document.getElementById(id).value.trim()}
+function intOr(id){const v=parseInt(val(id),10);return (isNaN(v)||v<0)?"?":String(v)}
 /* 金额一律按"分"计算，避免浮点误差。空=null（未填）；负数/非法=bad。 */
 function cents(id){
   const raw=val(id);
@@ -146,7 +147,7 @@ function render(){
   if(r.t==="incomplete"){box.innerHTML=head+"①② 利润账：<b>资料不全，无法计算</b>——营业额、已售商品成本、其他费用三项都要填（不知道的先去查，别按 0 算）。";return}
   const lines=[];
   lines.push("① 利润账：营业额 "+yuan(cents("r3").c)+" - 已售商品成本 "+yuan(cents("r4").c)+" = 毛利 "+yuan(r.gross)+"；再减其他费用 "+yuan(cents("r5").c)+" = <b>净利 "+yuan(r.profit)+" 元</b>");
-  if(r.h!==null)lines.push("② 时间账："+(r.h/100)+" 小时 → 时薪约 <b>"+yuan(r.h>0?Math.round(r.profit/r.h*100):0)+" 元</b>（跟当地零工价比一比）");
+  if(r.h!==null)lines.push(r.h>0?"② 时间账："+(r.h/100)+" 小时 → 时薪约 <b>"+yuan(Math.round(r.profit/r.h*100))+" 元</b>（跟当地零工价比一比）":"② 时间账：投入工时为 0，<b>时薪无法计算</b>——请核对时间投入是否漏填");
   if(r.cash!==null)lines.push("③ 现金账：实际支付 "+yuan(cents("r8").c)+" - 实际收到 "+yuan(cents("r7").c)+" = 现金净流出 <b>"+yuan(r.cash)+" 元</b>");
   else lines.push("③ 现金账：实际收到/实际支付未填齐，无法计算");
   if(r.inv!==null&&r.cash!==null)lines.push("📦 剩余库存成本价值 "+yuan(r.inv)+" 元——货还在你手里，和上面的现金净流出是两笔并列的账");
@@ -188,7 +189,7 @@ function load(){
 function clearAll(){
   if(confirm("确定清空全部内容？")){
     IDS.forEach(i=>{const el=document.getElementById(i);el.value="";el.classList.remove("bad")});
-    try{localStorage.removeItem(STORE_KEY)}catch(e){}
+    try{localStorage.removeItem(STORE_KEY);localStorage.removeItem(LEGACY_KEY)}catch(e){}
     migratedNote="";
     render();
   }
@@ -199,14 +200,14 @@ function exportMd(){
   "- 最多投入："+(cents("q2a").s==="ok"?yuan(cents("q2a").c):"?")+" 元 / "+(cents("q2b").s==="ok"?yuan(cents("q2b").c):"?")+" 小时",
   "- 支持继续的信号："+(val("q3")||"（未填）"),
   "- 停止条件："+(val("q4")||"（未填）"),"","## 二、结果与三笔账",
-  "- 触达："+(cents("r1").s==="ok"?cents("r1").c:"?")+" 人，成交 "+(cents("r2").s==="ok"?cents("r2").c:"?")+" 单"];
+  "- 触达："+(intOr("r1"))+" 人，成交 "+(intOr("r2"))+" 单"];
   if(anyBad()){L.push("- ⚠️ 存在无效输入（负数或非法数字），利润账未计算");}
   else{
     const r=ledger();
     if(r.t==="incomplete"){L.push("- ①② 利润账：资料不全，无法计算（营业额/已售商品成本/其他费用未填齐）");}
     else{
       L.push("- ① 利润账：营业额 "+yuan(cents("r3").c)+" - 已售商品成本 "+yuan(cents("r4").c)+" - 其他费用 "+yuan(cents("r5").c)+" = **净利 "+yuan(r.profit)+" 元**");
-      if(r.h!==null)L.push("- ② 时间账："+(r.h/100)+" 小时，时薪约 "+yuan(r.h>0?Math.round(r.profit/r.h*100):0)+" 元");
+      if(r.h!==null)L.push(r.h>0?"- ② 时间账："+(r.h/100)+" 小时，时薪约 "+yuan(Math.round(r.profit/r.h*100))+" 元":"- ② 时间账：投入工时为 0，时薪无法计算——请核对时间投入是否漏填");
       if(r.cash!==null)L.push("- ③ 现金账：现金净流出 "+yuan(r.cash)+" 元（实际支付 - 实际收到）");
       else L.push("- ③ 现金账：实际收到/实际支付未填齐，无法计算");
       if(r.inv!==null)L.push("- 📦 剩余库存成本价值 "+yuan(r.inv)+" 元（与现金净流出并列，不是其中的一部分）");
