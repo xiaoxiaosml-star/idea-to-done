@@ -57,13 +57,15 @@ function validateProtocol(obj){
   }
   if(t==='review'){
     if(!isStr(obj.result))return {ok:false,error:'review.result'};
+    if(!isStr(obj.next))return {ok:false,error:'review.next-required'};
+    if(!['continue','adjust','pause','stop'].includes(obj.suggest))return {ok:false,error:'review.suggest-invalid'};
     const sug=['continue','adjust','pause','stop'];
     return {ok:true,type:t,data:{
       result:obj.result.trim(),
       assumptionDelta:isStr(obj.assumptionDelta)?obj.assumptionDelta.trim():'',
       stillUnknown:isStr(obj.stillUnknown)?obj.stillUnknown.trim():'',
-      next:isStr(obj.next)?obj.next.trim():'',
-      suggest:sug.includes(obj.suggest)?obj.suggest:'continue'
+      next:obj.next.trim(),
+      suggest:obj.suggest
     }};
   }
   return {ok:false,error:'unknown-type:'+t};

@@ -136,6 +136,16 @@
         <div class="card" id="wPlanCard">
           <h2>📋 当前计划</h2>
           <div id="wPlan"><div class="empty">还没有计划草案</div></div>
+          <details id="planFormBox" style="margin-top:12px">
+            <summary style="cursor:pointer;font-size:13px;color:var(--muted)">✏️ 写一份计划草案（已有计划直接开始 / 修改AI草案）</summary>
+            <label>要验证什么</label><input type="text" id="pfQuestion">
+            <label>具体动作（能今天就开干的）</label><input type="text" id="pfAction">
+            <label>做到什么程度算完</label><input type="text" id="pfAccept">
+            <label>投入上限（时间/钱，写数字）</label><input type="text" id="pfBudget">
+            <label>出现什么结果该停</label><input type="text" id="pfStop">
+            <label>要带回的证据</label><input type="text" id="pfEvidence">
+            <div class="toolbar"><button class="ghost" onclick="saveDraft()">存为草案（待确认）</button></div>
+          </details>
         </div>
         <div class="card">
           <h2>📥 执行与证据</h2>
@@ -258,7 +268,8 @@ function renderDiscuss(p){
         ${d.stillUnknown?`<div class="row"><b>仍未知：</b>${esc(d.stillUnknown)}</div>`:''}
         ${d.next?`<div class="row"><b>建议下一步：</b>${esc(d.next)}</div>`:''}</div>`;
     }
-    return `<div class="msg ${m.role}"><div class="who">${m.role==='user'?'你':'成事工坊'} ｜ ${m.at.slice(0,16).replace('T',' ')}</div><div class="bub">${esc(m.text)}</div>${proto}</div>`;
+    const stale=m.stale?'<div class="sub" style="margin-top:5px;color:var(--warn)">⚠️ 这条回复生成期间你有新修改，它基于稍早状态，仅供参考</div>':'';
+    return `<div class="msg ${m.role}"><div class="who">${m.role==='user'?'你':'成事工坊'} ｜ ${m.at.slice(0,16).replace('T',' ')}</div><div class="bub">${esc(m.text)}</div>${proto}${stale}</div>`;
   }).join('');
   el.scrollTop=el.scrollHeight;
 }
@@ -273,17 +284,28 @@ function planProtoHtml(d,confirmed){
 }
 function renderPlan(p){
   const el=document.getElementById('wPlan');
-  if(!p.plan){el.innerHTML='<div class="empty">还没有计划草案</div>';return;}
-  const pl=p.plan;
-  let h=`<div class="planfield"><b>要验证</b>${esc(pl.question)}</div>
-    <div class="planfield"><b>具体动作</b>${esc(pl.action)}</div>
-    <div class="planfield"><b>做到算完</b>${esc(pl.accept)}</div>
-    <div class="planfield"><b>投入上限</b>${esc(pl.budget)}</div>
-    <div class="planfield"><b>该停就停</b>${esc(pl.stop)}</div>
-    <div class="planfield"><b>带回证据</b>${esc(pl.evidenceToBring)}</div>
-    <div class="sub" style="margin-top:8px">v${pl.version} ｜ ${pl.author==='ai'?'AI 草案':'你手写'} ｜ ${{draft:'待确认',confirmed:'已确认'}}[pl.status]</div>`;
-  if(pl.status==='draft')h+=`<div class="toolbar"><button class="primary" onclick="confirmPlan()">✅ 确认这个计划，开始执行</button></div>`;
+  const fields=d=>`<div class="planfield"><b>要验证</b>${esc(d.question)}</div>
+    <div class="planfield"><b>具体动作</b>${esc(d.action)}</div>
+    <div class="planfield"><b>做到算完</b>${esc(d.accept)}</div>
+    <div class="planfield"><b>投入上限</b>${esc(d.budget)}</div>
+    <div class="planfield"><b>该停就停</b>${esc(d.stop)}</div>
+    <div class="planfield"><b>带回证据</b>${esc(d.evidenceToBring)}</div>`;
+  let h='';
+  if(p.plan){
+    h+=`<div class="proto" style="border-color:var(--ok)"><div class="pt" style="color:var(--ok)">✅ 执行中计划（已确认）</div>${fields(p.plan)}
+      <div class="sub" style="margin-top:6px">v${p.plan.version} ｜ ${p.plan.author==='ai'?'AI 草案经你确认':'你手写'} ｜ ${p.plan.confirmedAt?p.plan.confirmedAt.slice(0,16).replace('T',' ')+' 确认':''}</div></div>`;
+  }
+  if(p.planDraft){
+    h+=`<div class="proto"><div class="pt">📝 待确认草案（不影响当前执行计划）</div>${fields(p.planDraft)}
+      <div class="sub" style="margin-top:6px">v${p.planDraft.version} ｜ ${p.planDraft.author==='ai'?'AI 提出':'你手写'}${p.planDraft.reason?' ｜ '+esc(p.planDraft.reason):''}</div>
+      <div class="toolbar"><button class="primary" onclick="confirmPlan()">确认这个草案${p.plan?'（替换当前计划）':''}</button></div></div>`;
+  }
+  if(!p.plan&&!p.planDraft)h='<div class="empty">还没有计划草案。让讨论生成，或在下方手写。</div>';
   el.innerHTML=h;
+  /* 预填表单: 有草案填草案,方便修改 */
+  const src=p.planDraft||p.plan||{};
+  for(const[k,id]of[['question','pfQuestion'],['action','pfAction'],['accept','pfAccept'],['budget','pfBudget'],['stop','pfStop'],['evidenceToBring','pfEvidence']])
+    document.getElementById(id).value=src[k]||'';
 }
 function renderExec(p){
   const el=document.getElementById('wExecList');
@@ -308,10 +330,34 @@ async function sendMessage(preset){
   busy(false);
 }
 async function confirmPlan(){
+  let reason='';
+  if(cur.plan&&cur.plan.status==='confirmed'){
+    const r=prompt('将替换当前已确认计划 v'+cur.plan.version+'，请写理由（会留档）:');
+    if(r===null)return;
+    reason=r;
+  }
   busy(true);
   try{
-    const d=await api('/api/projects/'+cur.id+'/plan/confirm',{base:curBase});
+    const d=await api('/api/projects/'+cur.id+'/plan/confirm',{base:curBase,reason});
     cur=d.project;curBase=cur.version;render();toast('计划已确认,去做,然后把真实结果记下来');
+  }catch(e){}
+  busy(false);
+}
+async function saveDraft(){
+  const body={question:document.getElementById('pfQuestion').value,action:document.getElementById('pfAction').value,
+    accept:document.getElementById('pfAccept').value,budget:document.getElementById('pfBudget').value,
+    stop:document.getElementById('pfStop').value,evidenceToBring:document.getElementById('pfEvidence').value,
+    author:'user',base:curBase};
+  if(!body.action.trim()){toast('至少把"具体动作"写上');return;}
+  if(cur.plan&&cur.plan.status==='confirmed'){
+    const r=prompt('当前有已确认计划 v'+cur.plan.version+'。存为新草案的理由（会留档）:');
+    if(r===null)return;
+    body.reason=r||'';
+  }
+  busy(true);
+  try{
+    const d=await api('/api/projects/'+cur.id+'/plan',body);
+    cur=d.project;curBase=cur.version;render();toast('草案已存。确认后才替换当前计划');
   }catch(e){}
   busy(false);
 }
@@ -332,9 +378,10 @@ async function saveExec(){
 async function doReview(){
   busy(true);
   try{
-    await api('/api/projects/'+cur.id+'/review',{base:curBase});
-    const d=await api('/api/projects/'+cur.id);cur=d.project;curBase=cur.version;render();
-    toast('复盘完成,看左侧讨论区');
+    const r=await api('/api/projects/'+cur.id+'/review',{base:curBase});
+    cur=r.project;curBase=cur.version;render();
+    if(r.ai&&r.ai.protocolOk)toast('复盘完成,看左侧讨论区');
+    else if(r.ai)toast('复盘回复到了但数据不合规（'+(r.ai.error||'未知')+'），原文留在讨论区,未计入已复盘');
   }catch(e){}
   busy(false);
 }
