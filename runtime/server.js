@@ -11,12 +11,13 @@ const os=require('os');
 const crypto=require('crypto');
 const {callClaude}=require('./adapter');
 const {parseProtocol,validExecution,validDecision}=require('./schemas');
+const {normalizeInputs,ledger,summaryLines}=require('./trial');
 
 const ROOT=process.env.CHENGSHI_ROOT||path.resolve(__dirname,'..');  /* 随包资源根 */
 const APP=path.join(ROOT,'app');
 const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop');
 const PROJ=path.join(DATA,'projects');
-const VERSION='0.1.1-stage1';
+const VERSION='0.1.2-stage2';
 const SKILL_CMD=process.env.CHENGSHI_SKILL||'/chengshi-workshop:idea-to-done';
 fs.mkdirSync(PROJ,{recursive:true});
 
@@ -40,7 +41,11 @@ function withLock(id,fn){
 /* ---- 数据层 ---- */
 const pid=id=>path.join(PROJ,id+'.json');
 function loadProject(id){
-  try{return JSON.parse(fs.readFileSync(pid(id),'utf8'));}catch(_){return null;}
+  try{
+    const p=JSON.parse(fs.readFileSync(pid(id),'utf8'));
+    if(!Array.isArray(p.trials))p.trials=[];                 /* 旧数据补齐 */
+    return p;
+  }catch(_){return null;}
 }
 function saveProject(p){
   p.version=(p.version||0)+1;
@@ -63,7 +68,7 @@ function newProject(idea,mode){
   return {id:'p'+Date.now().toString(36)+crypto.randomBytes(3).toString('hex'),
     idea:idea.trim(),mode:mode||'discuss',stage:mode==='direct'?'execute':'discuss',
     status:'active',version:0,createdAt:now,updatedAt:now,
-    discussion:[],plan:null,planDraft:null,planHistory:[],executions:[],decision:null,sessionId:null};
+    discussion:[],plan:null,planDraft:null,planHistory:[],executions:[],trials:[],decision:null,sessionId:null};
 }
 
 /* ---- 提示词构建: 上下文 + 数据协议 + 明确任务 ---- */
@@ -85,6 +90,13 @@ function contextBlock(p){
   if(p.executions.length){
     L.push('【执行记录 · 按时间顺序,最后一条最新】\n'+p.executions.map((e,i)=>
       `${i+1}. [计划v${e.planVersion||0}] 动作:${e.action}｜实际投入:${e.input||'未填'}｜结果:${e.result||'未填'}\n   证据:${e.evidence||'未填'}${e.note?'｜备注:'+e.note:''}（${e.at.slice(0,10)}）`).join('\n'));
+  }
+  if(p.trials&&p.trials.length){
+    const yuan=c=>(c/100).toFixed(2);
+    L.push('【首次小生意验证单 · 实测输入与三笔账,按时间顺序】\n'+p.trials.map((t,i)=>{
+      const q=t.inputs,n=t.nums;
+      return `${i+1}. [计划v${t.planVersion||0}·${t.at.slice(0,10)}]\n   验证什么:${q.q1||'未填'}｜最多投入:${n.q2a!==null?yuan(n.q2a):'?'} 元 / ${n.q2b!==null?yuan(n.q2b):'?'} 小时\n   继续信号:${q.q3||'未填'}｜停止条件:${q.q4||'未填'}\n   结果:${q.c1||'未填'}｜数字:${q.c2||'未填'}｜结论:${q.c3||'未填'}\n   ${t.lines.join('\n   ')}`;
+    }).join('\n'));
   }
   if(p.decision)L.push('【当前结局决定】'+({done:'达成',go:'继续验证',pause:'暂停',stop:'终止'})[p.decision.type]+'：'+p.decision.reason);
   return L.join('\n\n');
@@ -109,7 +121,9 @@ function reviewPrompt(p){
     +'\n\n【本次任务】复盘。请针对下面这条最新证据做对照复盘，不要重复之前的回答：'
     +'\n最新动作：'+latest.action+'\n实际投入：'+(latest.input||'未填')+'\n结果：'+(latest.result||'未填')
     +'\n证据：'+(latest.evidence||'未填')+(latest.note?'\n用户备注：'+latest.note:'')
-    +'\n逐条对照事前标准与停止条件，给出 review 协议块（next 与 suggest 必填）。';
+    +'\n逐条对照事前标准、投入上限与停止条件（含验证单里用户自己写的判断条件），'
+    +'结合上面验证单的三笔账实测数字给出复盘建议；不要只重复账面数字，要判断对照停止/继续条件后该继续、调整、暂停还是停止。'
+    +'给出 review 协议块（next 与 suggest 必填）。';
 }
 
 /* ---- HTTP 层 ---- */
@@ -290,6 +304,28 @@ const server=http.createServer(async(req,res)=>{
         });
         if(!result)return;
         return send(res,200,{project:result,execution:result.executions[result.executions.length-1]});
+      }
+
+      /* 首次小生意验证单: 保存实测输入+服务端计算三笔账,关联当前已确认计划版本 */
+      if(parts[3]==='trials'&&req.method==='POST'){
+        const n=normalizeInputs(body.inputs);
+        if(!n.ok)return send(res,400,{error:n.error});
+        const L=ledger(n.nums);
+        const sum=summaryLines(n.inputs,n.nums,L);
+        const result=await withLock(id,()=>{
+          const F=loadProject(id);
+          if(!F){send(res,404,{error:'not-found'});return null;}
+          if(!needBase(F))return null;
+          const t={id:'t'+Date.now().toString(36)+crypto.randomBytes(2).toString('hex'),
+            planVersion:F.plan&&F.plan.status==='confirmed'?F.plan.version:0,
+            inputs:n.inputs,nums:n.nums,lines:sum.lines,ledger:L,
+            at:new Date().toISOString()};
+          F.trials.push(t);
+          saveProject(F);
+          return t;
+        });
+        if(!result)return;
+        return send(res,200,{project:loadProject(id),trial:result});
       }
 
       /* 带着最新证据续谈复盘: 只接受合法 review 协议才计入"已复盘" */

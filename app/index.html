@@ -67,6 +67,16 @@
   .empty{color:var(--muted);font-size:13.5px;padding:26px 0;text-align:center}
   .decide-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   .decide-row button{flex:1;min-width:110px;font-size:12.5px;padding:8px 6px}
+  /* 验证单 */
+  .tgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  @media(max-width:520px){.tgrid{grid-template-columns:1fr}}
+  .tref{font-size:12.5px;color:var(--muted);background:#f7f2e8;border:1px dashed var(--wood-lt);border-radius:8px;padding:8px 12px;margin-bottom:10px}
+  .tcalc{font-size:13px;background:#f2f8f2;border:1px solid var(--line);border-radius:8px;padding:10px 13px;margin-top:10px;display:none}
+  .tcalc.show{display:block}
+  .tcalc .tl{margin-bottom:4px}
+  .trial{border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin-bottom:10px;background:#fff}
+  .trial .th{font-size:12px;color:var(--muted);margin-bottom:6px}
+  .trial .tl{font-size:13px;margin-bottom:3px}
 </style>
 </head>
 <body>
@@ -166,6 +176,45 @@
           <div class="toolbar">
             <button class="ghost" onclick="doReview()">🫱 带着结果继续讨论（复盘）</button>
           </div>
+          <div class="sub" id="reviewHint" style="margin-top:6px"></div>
+        </div>
+        <div class="card">
+          <h2>🧾 首次小生意验证单</h2>
+          <div class="sub" style="margin-bottom:8px">实测后填结果，自动算三笔账（利润/时间/现金）。同一事项内归档，复盘时 Skill 直接读这些数字。口径与《首次小生意验证单》工具一致。</div>
+          <div class="tref" id="tvRef" style="display:none"></div>
+          <label>1. 验证什么</label>
+          <input type="text" id="tvQ1">
+          <div class="tgrid">
+            <div><label>2a. 最多投入多少钱（元）</label><input type="text" id="tvQ2a" inputmode="decimal"></div>
+            <div><label>2b. 最多投入多少时间（小时）</label><input type="text" id="tvQ2b" inputmode="decimal"></div>
+          </div>
+          <label>3. 支持继续的信号</label>
+          <input type="text" id="tvQ3">
+          <label>4. 停止条件</label>
+          <input type="text" id="tvQ4">
+          <div class="sub" style="margin:14px 0 0;font-weight:600;color:var(--ink)">—— 实测结果 ——</div>
+          <div class="tgrid">
+            <div><label>触达人数</label><input type="text" id="tvR1" inputmode="numeric"></div>
+            <div><label>成交单数</label><input type="text" id="tvR2" inputmode="numeric"></div>
+            <div><label>营业额（元）</label><input type="text" id="tvR3" inputmode="decimal"></div>
+            <div><label>已售商品成本（元，进价×卖出件数）</label><input type="text" id="tvR4" inputmode="decimal"></div>
+            <div><label>其他费用（元，摊位/交通/包装/损耗）</label><input type="text" id="tvR5" inputmode="decimal"></div>
+            <div><label>实际投入时间（小时）</label><input type="text" id="tvR6" inputmode="decimal"></div>
+            <div><label>实际收到（元现金流入）</label><input type="text" id="tvR7" inputmode="decimal"></div>
+            <div><label>实际支付（元现金流出，含垫库存）</label><input type="text" id="tvR8" inputmode="decimal"></div>
+            <div><label>剩余库存成本（元，选填）</label><input type="text" id="tvR9" inputmode="decimal"></div>
+          </div>
+          <label>这周实际动作</label>
+          <input type="text" id="tvC1">
+          <label>结果数字</label>
+          <input type="text" id="tvC2">
+          <label>结论</label>
+          <input type="text" id="tvC3">
+          <div class="tcalc" id="tvCalc"></div>
+          <div class="toolbar">
+            <button class="primary" onclick="saveTrial()">保存验证单（计入本事项与复盘）</button>
+          </div>
+          <div id="tvList" style="margin-top:12px"></div>
         </div>
       </div>
     </div>
@@ -251,7 +300,7 @@ function render(){
     +(p.sessionId?' ｜ 独立会话 '+p.sessionId.slice(0,8):'')
     +(p.plan&&p.plan.status==='confirmed'?' ｜ 计划 v'+p.plan.version+' 已确认':'')
     +(p.decision?' ｜ 理由：'+esc(p.decision.reason):'');
-  renderDiscuss(p);renderPlan(p);renderExec(p);
+  renderDiscuss(p);renderPlan(p);renderExec(p);renderTrial(p);
 }
 function renderDiscuss(p){
   const el=document.getElementById('wDiscuss');
@@ -316,6 +365,84 @@ function renderExec(p){
     ${e.evidence?`<div class="ev">证据:${esc(e.evidence)}</div>`:''}
     ${e.note?`<div class="em">备注:${esc(e.note)}</div>`:''}</div>`).join('');
 }
+
+/* ---- 验证单: 口径与 runtime/trial.js、独立工具完全一致(金额按分, 空=未填, 负数标红) ---- */
+const TV_IDS=["q1","q2a","q2b","q3","q4","r1","r2","r3","r4","r5","r6","r7","r8","r9","c1","c2","c3"];
+const TV_NUM=["q2a","q2b","r1","r2","r3","r4","r5","r6","r7","r8","r9"];
+const TV_EL={q1:'tvQ1',q2a:'tvQ2a',q2b:'tvQ2b',q3:'tvQ3',q4:'tvQ4',r1:'tvR1',r2:'tvR2',r3:'tvR3',r4:'tvR4',r5:'tvR5',r6:'tvR6',r7:'tvR7',r8:'tvR8',r9:'tvR9',c1:'tvC1',c2:'tvC2',c3:'tvC3'};
+function tvVal(k){return document.getElementById(TV_EL[k]).value}
+function tvCents(raw){
+  if(raw.trim()==='')return{s:'empty',c:null};
+  const v=Number(raw);
+  if(!isFinite(v)||v<0)return{s:'bad',c:null};
+  return{s:'ok',c:Math.round(v*100)};
+}
+function tvInt(raw){
+  if(raw.trim()==='')return{s:'empty',c:null};
+  const v=parseInt(raw,10);
+  if(isNaN(v)||v<0)return{s:'bad',c:null};
+  return{s:'ok',c:v};
+}
+function tvYuan(c){return (c/100).toFixed(2)}
+function tvCompute(){
+  const nums={};
+  for(const k of TV_NUM)nums[k]=(k==='r1'||k==='r2'?tvInt:tvCents)(tvVal(k));
+  if(TV_NUM.some(k=>nums[k].s==='bad'))return{bad:true};
+  const g=k=>nums[k].s==='ok'?nums[k].c:null;
+  const rev=g('r3'),cogs=g('r4'),fee=g('r5'),h=g('r6'),paid=g('r8'),got=g('r7'),inv=g('r9');
+  if(rev===null||cogs===null||fee===null)return{incomplete:true};
+  const gross=rev-cogs,profit=gross-fee;
+  const cash=(paid!==null&&got!==null)?paid-got:null;
+  const lines=[];
+  lines.push('触达：'+(g('r1')===null?'?':g('r1'))+' 人，成交 '+(g('r2')===null?'?':g('r2'))+' 单');
+  lines.push('① 利润账：营业额 '+tvYuan(rev)+' - 已售商品成本 '+tvYuan(cogs)+' = 毛利 '+tvYuan(gross)+'；再减其他费用 '+tvYuan(fee)+' = 净利 '+tvYuan(profit)+' 元');
+  if(h!==null)lines.push(h>0?'② 时间账：'+(h/100)+' 小时 → 时薪约 '+tvYuan(Math.round(profit/h*100))+' 元（跟当地零工价比一比）':'② 时间账：投入工时为 0，时薪无法计算——请核对时间投入是否漏填');
+  lines.push(cash!==null?'③ 现金账：实际支付 '+tvYuan(paid)+' - 实际收到 '+tvYuan(got)+' = 现金净流出 '+tvYuan(cash)+' 元':'③ 现金账：实际收到/实际支付未填齐，无法计算');
+  if(inv!==null&&cash!==null)lines.push('📦 剩余库存成本价值 '+tvYuan(inv)+' 元——货还在你手里，和上面的现金净流出是两笔并列的账');
+  if(profit>0)lines.push('✅ 净利为正——但一单不算赢，陌生客户连续成交再谈加码');
+  else if(profit===0)lines.push('➖ 收支持平：没赚也没亏，但时间花掉了——按「支持继续的信号」判断下一步');
+  else lines.push('⚠️ 净利为负：营业额高不等于赚钱，先查哪笔账漏了');
+  return{lines};
+}
+function tvPreview(){
+  const box=document.getElementById('tvCalc');
+  const r=tvCompute();
+  if(r.bad){box.className='tcalc show';box.innerHTML='<div class="tl" style="color:var(--bad)">⚠️ 存在无效输入：金额不能为负，请检查。</div>';return;}
+  if(r.incomplete){box.className='tcalc';box.innerHTML='';return;}
+  box.className='tcalc show';
+  box.innerHTML=r.lines.map(l=>'<div class="tl">'+esc(l)+'</div>').join('');
+}
+function renderTrial(p){
+  /* 计划参照条 + 空栏自动带入已确认计划(只填空栏,不覆盖已写内容) */
+  const ref=document.getElementById('tvRef');
+  if(p.plan&&p.plan.status==='confirmed'){
+    ref.style.display='';
+    ref.innerHTML='📌 来自当前执行计划 v'+p.plan.version+'：投入上限「'+esc(p.plan.budget)+'」｜做到算完「'+esc(p.plan.accept)+'」｜该停就停「'+esc(p.plan.stop)+'」——判断条件不用重抄，下方自动带入。';
+    const fill={q1:p.plan.question,q3:p.plan.accept,q4:p.plan.stop};
+    for(const k in fill){const el=document.getElementById(TV_EL[k]);if(!el.value.trim()&&fill[k])el.value=fill[k];}
+  }else{ref.style.display='none';}
+  /* 已存验证单列表 */
+  const list=document.getElementById('tvList');
+  const ts=p.trials||[];
+  if(!ts.length){list.innerHTML='<div class="empty" style="padding:10px 0">还没有保存过验证单。填完点「保存验证单」。</div>';}
+  else list.innerHTML=ts.map(t=>'<div class="trial"><div class="th">🧾 '+t.at.slice(0,16).replace('T',' ')+' ｜ 关联 [计划v'+(t.planVersion||0)+']'+(t.planVersion===(p.plan&&p.plan.version)?'（当前计划）':'（历史版本）')+'</div>'
+    +t.lines.map(l=>'<div class="tl">'+esc(l)+'</div>').join('')+'</div>').join('');
+  /* 复盘提示 */
+  document.getElementById('reviewHint').textContent=ts.length?'复盘时会带上这 '+ts.length+' 份验证单的三笔账实测数字。':'';
+  tvPreview();
+}
+async function saveTrial(){
+  const inputs={};for(const k of TV_IDS)inputs[k]=tvVal(k);
+  busy(true);
+  try{
+    const d=await api('/api/projects/'+cur.id+'/trials',{base:curBase,inputs});
+    cur=d.project;curBase=cur.version;render();
+    const pl=d.trial.lines.find(l=>l.indexOf('净利')>0);
+    toast(pl?'验证单已保存：净利 '+pl.split('净利 ')[1].split(' 元')[0]+' 元，复盘时 Skill 会读到':'验证单已保存（利润账未填齐），复盘时 Skill 会读到');
+  }catch(e){}
+  busy(false);
+}
+TV_IDS.forEach(k=>document.getElementById(TV_EL[k]).addEventListener('input',tvPreview));
 
 /* ---- 动作 ---- */
 async function sendMessage(preset){
