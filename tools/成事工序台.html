@@ -124,9 +124,9 @@
   <div class="card" style="background:linear-gradient(180deg,#fbf6ec,#f8f2e4)">
     <h2 style="border-left-color:var(--gold)">🔍 你现在是什么状态？点一个，直接带你去该去的地方</h2>
     <div class="toolbar" style="margin:4px 0 0">
-      <button class="primary" onclick="triage('recon')">🌫 完全没概念<br><span style="font-size:11px;font-weight:400">想做事，但不知道做成什么样</span></button>
-      <button class="ghost" onclick="triage('wish')">💭 有模糊愿望<br><span style="font-size:11px;font-weight:400">说得出口，但还没验证过</span></button>
-      <button class="ghost" onclick="triage('stuck')">🧱 已开工但卡住<br><span style="font-size:11px;font-weight:400">动过手了，现在卡在某一步</span></button>
+      <button id="triRecon" class="primary" onclick="triage('recon')">🌫 完全没概念<br><span style="font-size:11px;font-weight:400">想做事，但不知道做成什么样</span></button>
+      <button id="triWish" class="ghost" onclick="triage('wish')">💭 有模糊愿望<br><span style="font-size:11px;font-weight:400">说得出口，但还没验证过</span></button>
+      <button id="triStuck" class="ghost" onclick="triage('stuck')">🧱 已开工但卡住<br><span style="font-size:11px;font-weight:400">动过手了，现在卡在某一步</span></button>
     </div>
     <div class="sub" id="triageHint" style="margin:10px 0 0"></div>
   </div>
@@ -347,6 +347,12 @@ function openBench(id,m){
 
 /* 入口自诊 */
 function triage(kind){
+  // 点哪个哪个高亮,让点击有明确的"被接住"感
+  const btns={recon:'triRecon',wish:'triWish',stuck:'triStuck'};
+  for(const k in btns){
+    const b=document.getElementById(btns[k]);
+    if(b) b.className=(k===kind)?'primary':'ghost';
+  }
   const hint=document.getElementById('triageHint');
   if(kind==='recon'){
     hint.textContent='→ 送你到第零关"念头检定"，已帮你切到"探路模式"：先去看真人真事，拿到参照物再写标准。';
