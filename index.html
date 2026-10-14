@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>成事工坊 · 轻资产创业，低成本成事</title>
+<meta name="description" content="有个念头却不知道怎么开始？先和 AI 讨论清楚，再把下一步带到工作台上做。成事工坊 = 《成事方法论》+ 本地工作台 + 真实复盘。">
+<style>
+  :root{
+    --bg:#f5f1ea;--panel:#fffdf9;--ink:#2b2620;--muted:#8a8177;--line:#e3dccc;
+    --wood:#8b5e34;--wood-lt:#c9a877;--ok:#2e7d4f;--warn:#b7791f;--bad:#b23c3c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.8}
+  .wrap{max-width:960px;margin:0 auto;padding:0 18px}
+  a{color:var(--wood)}
+  /* 首屏 */
+  .hero{padding:72px 0 46px;text-align:center}
+  .hero .logo{font-size:15px;letter-spacing:6px;color:var(--wood);font-weight:700}
+  .hero h1{font-size:clamp(24px,4.6vw,38px);margin:14px 0 10px;letter-spacing:1px}
+  .hero p.sub{font-size:clamp(14px,2.4vw,17px);color:var(--muted);max-width:620px;margin:0 auto}
+  .slogan{display:inline-block;margin-top:14px;font-size:13.5px;color:var(--wood);border:1px dashed var(--wood-lt);border-radius:20px;padding:4px 18px;background:#fbf6ec}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:30px}
+  button,.btn{padding:12px 30px;border:0;border-radius:9px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-block;transition:.15s}
+  .primary{background:var(--wood);color:#fff}
+  .primary:hover{background:#74491f}
+  .ghost{background:#ece5d8;color:var(--ink)}
+  .ghost:hover{background:#e2d9c8}
+  section{padding:40px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:26px 28px;box-shadow:0 1px 3px rgba(80,60,30,.06)}
+  h2{font-size:20px;margin-bottom:6px;padding-left:11px;border-left:5px solid var(--wood)}
+  h3{font-size:15.5px;margin:20px 0 6px}
+  .sub{color:var(--muted);font-size:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:18px}
+  .mini-card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:18px 20px}
+  .mini-card b{font-size:14.5px}
+  .mini-card p{font-size:13.5px;color:var(--muted);margin-top:6px}
+  /* 示例 */
+  .demo-step{display:flex;gap:14px;margin-top:16px;align-items:flex-start}
+  .demo-step .n{flex:none;width:30px;height:30px;border-radius:50%;background:var(--wood);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:3px}
+  .demo-step .b{flex:1;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:14px}
+  .demo-step .b .who{font-size:12px;color:var(--muted);margin-bottom:4px}
+  .simtag{display:inline-block;font-size:11px;color:var(--warn);border:1px solid var(--warn);border-radius:10px;padding:1px 9px;margin-left:8px;vertical-align:2px}
+  /* 安装 */
+  .req{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+  .req span{font-size:13px;background:#efe8db;border-radius:18px;padding:5px 15px}
+  ol.steps{margin:12px 0 0 22px;font-size:14.5px}
+  ol.steps li{margin-bottom:8px}
+  code{background:#efe8db;border-radius:5px;padding:2px 8px;font-size:13px;font-family:Consolas,monospace}
+  footer{border-top:1px solid var(--line);margin-top:36px;padding:26px 0 46px;font-size:12.5px;color:var(--muted);text-align:center}
+  @media(max-width:720px){
+    .grid2,.grid3{grid-template-columns:1fr}
+    .hero{padding:52px 0 36px}
+    section{padding:30px 0}
+    .card{padding:20px 16px}
+    .cta>button,.cta>.btn{flex:1;min-width:220px;text-align:center}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="logo">成事工坊</div>
+    <h1>有个念头，却不知道怎么开始？</h1>
+    <p class="sub">先和 AI 讨论清楚，再把下一步带到工作台上做：确认计划、记下真实结果、带着结果复盘。讨论、执行、复盘围绕同一件事，不用复制粘贴。</p>
+    <div class="slogan">轻资产创业，低成本成事</div>
+    <div class="cta">
+      <a class="btn primary" href="#install">成套安装并开始</a>
+      <a class="btn ghost" href="#demo">看一次完整使用示例</a>
+    </div>
+  </div>
+
+  <section id="demo">
+    <div class="card">
+      <h2>一次完整使用长这样<span class="simtag">示例为模拟演示</span></h2>
+      <div class="demo-step"><div class="n">1</div><div class="b"><div class="who">你 · 开始页</div>「我想利用晚上时间摆个摊赚点钱，但完全不知道卖什么……」</div></div>
+      <div class="demo-step"><div class="n">2</div><div class="b"><div class="who">成事工坊 Skill · 讨论区</div>先问最影响判断的三件事：最多能亏多少、一周能出摊几晚、地铁口已有几个同类摊。你逐条回答。</div></div>
+      <div class="demo-step"><div class="n">3</div><div class="b"><div class="who">Skill 给出计划草案 → 你在网页点「确认」</div>验证什么（地铁口有效时段的真实需求）、具体动作（周五六晚蹲点数人流+问两个摊主）、做到算完、投入上限、该停就停的条件。确认后工作台直接生成任务，零复制。</div></div>
+      <div class="demo-step"><div class="n">4</div><div class="b"><div class="who">你 · 现实中行动，回到同一事项记下结果</div>「晚 7-9 点约 300 人经过，烤肠摊一晚净赚约 120-180」——证据（摊主原话、计数表照片）和执行记录存在同一个地方。做小生意小试时，验证单自动算利润/时间/现金三笔账。</div></div>
+      <div class="demo-step"><div class="n">5</div><div class="b"><div class="who">你点「带着结果继续讨论」→ Skill 读取全部记录复盘</div>对照事前定的判断条件给建议：哪些假设被支持、下一步做什么、什么时候该停。想暂停或终止，任何阶段都能记录理由。</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="grid3">
+      <div class="mini-card"><b>📖 《成事方法论》</b><p>念头检定、六个工位、图纸与扳手——按当前问题加载对应章节，不一次塞完全部内容。正文随包开源。</p></div>
+      <div class="mini-card"><b>🧾 独立工具</b><p>《首次小生意验证单》《成事工序台》可脱离工作台单独使用，浏览器打开即算。</p></div>
+      <div class="mini-card"><b>🔓 全部开源</b><p>公益项目，不收费、不导流课程。文字内容 CC BY 4.0，代码 MIT，详见仓库 LICENSE。</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="card">
+      <h2>成套安装并开始</h2>
+      <p class="sub">装好后，日常动作只有一个：打开「成事工坊」→ 开始或继续一件事。</p>
+      <h3>支持条件</h3>
+      <div class="req">
+        <span>Windows（首发实测环境）</span>
+        <span>已安装并登录 Claude Code</span>
+        <span>讨论走你已登录的 AI 账户计费</span>
+      </div>
+      <h3>安装入口（真实制品）</h3>
+      <ol class="steps">
+        <li>获取本仓库代码（<code>git clone https://github.com/xiaoxiaosml-star/idea-to-done.git</code> 或下载 ZIP 解压）。</li>
+        <li>双击运行 <code>installer/install.cmd</code>。安装器自动检测环境、注册并安装插件、准备数据目录、创建启动入口，无需手动装依赖、写路径或开终端。</li>
+        <li>从开始菜单或桌面的「成事工坊」启动，它会自动拉起本地服务并打开工作台。</li>
+      </ol>
+      <p class="sub" style="margin-top:14px">macOS / Linux 打包已预留，未在对应系统实测前不宣称支持。更新不清空你的项目数据。</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>你的数据在哪</h2>
+      <p style="font-size:14.5px">项目记录只存在你的电脑本机（独立数据目录，与插件缓存分开）。讨论时，必要的上下文会发送给你正在使用的 AI 服务——这一点如实说明：本工具不建云账户、不收数据，但「AI 讨论」这一步走的是你自己的 AI 软件账户与计费。</p>
+    </div>
+  </section>
+
+  <footer>
+    成事工坊 · idea-to-done ｜ 轻资产创业，低成本成事<br>
+    <a href="https://github.com/xiaoxiaosml-star/idea-to-done">GitHub 仓库</a> ｜
+    <a href="https://github.com/xiaoxiaosml-star/idea-to-done/blob/main/LICENSE">开源许可</a> ｜
+    当前版本 v0.1.4-stage3（试用版，待真实使用验证）
+  </footer>
+</div>
+</body>
+</html>

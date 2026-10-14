@@ -17,7 +17,7 @@ const ROOT=process.env.CHENGSHI_ROOT||path.resolve(__dirname,'..');  /* 随包�
 const APP=path.join(ROOT,'app');
 const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop');
 const PROJ=path.join(DATA,'projects');
-const VERSION='0.1.3-stage2';
+const VERSION='0.1.4-stage3';
 const SKILL_CMD=process.env.CHENGSHI_SKILL||'/chengshi-workshop:idea-to-done';
 fs.mkdirSync(PROJ,{recursive:true});
 
@@ -59,7 +59,10 @@ function listProjects(){
   return fs.readdirSync(PROJ).filter(f=>f.endsWith('.json')).map(f=>{
     try{
       const p=JSON.parse(fs.readFileSync(path.join(PROJ,f),'utf8'));
-      return {id:p.id,idea:p.idea,stage:p.stage,status:p.status,decision:p.decision||null,updatedAt:p.updatedAt};
+      const next=p.plan&&p.plan.status==='confirmed'?'当前动作:'+p.plan.action
+        :(p.planDraft?'有待确认草案(确认后生效)'
+        :((p.executions&&p.executions.length)||(p.trials&&p.trials.length)?'已有实测记录,可带着结果复盘':'待讨论出第一个动作'));
+      return {id:p.id,idea:p.idea,stage:p.stage,status:p.status,decision:p.decision||null,updatedAt:p.updatedAt,next};
     }catch(_){return null;}
   }).filter(Boolean).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
 }
