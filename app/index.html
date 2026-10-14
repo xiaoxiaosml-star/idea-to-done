@@ -255,6 +255,7 @@
         <div class="card" id="cardResult">
           <h2>📊 结果与复盘</h2>
           <div id="wLatest"></div>
+          <div id="wReview"></div>
           <label style="margin-top:16px">全部真实记录（执行 + 验证单）</label>
           <div id="wExecList"></div>
           <div id="wTrialSum"></div>
@@ -424,6 +425,13 @@ function renderResult(p){
   }
   if(p.decision)h+='<div class="planfield" style="margin-top:8px"><b>结局</b>'+{done:'🎯 达成',go:'🚀 继续验证',pause:'⏸ 暂停',stop:'🛑 终止'}[p.decision.type]+'　'+esc(p.decision.reason)+'</div>';
   document.getElementById('wLatest').innerHTML=h;
+  /* 最近一次合法复盘建议(与讨论区同一份协议数据, 同一渲染函数保证口径一致) */
+  const rv=[...p.discussion].reverse().find(m=>m.protocol&&m.protocol.type==='review');
+  document.getElementById('wReview').innerHTML=rv
+    ?'<label style="margin-top:16px">🔁 最近一次复盘建议 ｜ '+esc(rv.at.slice(0,16).replace('T',' '))+(rv.stale?'　<span style="color:var(--warn)">⚠️ 生成期间你有新修改，基于稍早状态，仅供参考</span>':'')+'</label>'
+      +reviewProtoHtml(rv.protocol)
+      +'<div class="toolbar" style="margin-top:8px"><button class="ghost" onclick="gotoDiscuss()">💬 去讨论区继续讨论（看原文与历史）</button></div>'
+    :'';
   /* 验证单紧凑清单(与执行记录并列, 全量明细仍在执行面板的工具里) */
   const ts=p.trials||[];
   document.getElementById('wTrialSum').innerHTML=ts.length
@@ -440,17 +448,21 @@ function renderDiscuss(p){
       const d=m.protocol;
       if(d.type==='questions')proto=`<div class="proto"><div class="pt">❓ 需要你补充（可直接在下方回复里逐条回答）</div><ol>${d.items.map(q=>'<li>'+esc(q)+'</li>').join('')}</ol></div>`;
       else if(d.type==='plan')proto=planProtoHtml(d,false);
-      else if(d.type==='review')proto=`<div class="proto"><div class="pt">🔁 复盘建议<span class="suggest ${d.suggest}">${{continue:'继续',adjust:'调整',pause:'暂停',stop:'终止'}}[d.suggest]</span></div>
-        <div class="row"><b>对照结果：</b>${esc(d.result)}</div>
-        ${d.assumptionDelta?`<div class="row"><b>假设变化：</b>${esc(d.assumptionDelta)}</div>`:''}
-        ${d.stillUnknown?`<div class="row"><b>仍未知：</b>${esc(d.stillUnknown)}</div>`:''}
-        ${d.next?`<div class="row"><b>建议下一步：</b>${esc(d.next)}</div>`:''}</div>`;
+      else if(d.type==='review')proto=reviewProtoHtml(d);
     }
     const stale=m.stale?'<div class="sub" style="margin-top:5px;color:var(--warn)">⚠️ 这条回复生成期间你有新修改，它基于稍早状态，仅供参考</div>':'';
     return `<div class="msg ${m.role}"><div class="who">${m.role==='user'?'你':'成事工坊'} ｜ ${m.at.slice(0,16).replace('T',' ')}</div><div class="bub">${esc(m.text)}</div>${proto}${stale}</div>`;
   }).join('');
   el.scrollTop=el.scrollHeight;
 }
+function reviewProtoHtml(d){
+  return `<div class="proto"><div class="pt">🔁 复盘建议<span class="suggest ${d.suggest}">${{continue:'继续',adjust:'调整',pause:'暂停',stop:'终止'}[d.suggest]}</span></div>
+    <div class="row"><b>对照结果：</b>${esc(d.result)}</div>
+    ${d.assumptionDelta?`<div class="row"><b>假设变化：</b>${esc(d.assumptionDelta)}</div>`:''}
+    ${d.stillUnknown?`<div class="row"><b>仍未知：</b>${esc(d.stillUnknown)}</div>`:''}
+    ${d.next?`<div class="row"><b>建议下一步：</b>${esc(d.next)}</div>`:''}</div>`;
+}
+function gotoDiscuss(){switchPanel('discuss');setTimeout(()=>{const i=document.getElementById('wInput');if(i)i.focus();},80);}
 function planProtoHtml(d,confirmed){
   return `<div class="proto"><div class="pt">📋 计划草案${confirmed?'（已确认）':'（待你确认）'}</div>
     <div class="planfield"><b>要验证</b>${esc(d.question)}</div>
@@ -766,7 +778,7 @@ async function doReview(){
   try{
     const r=await api('/api/projects/'+cur.id+'/review',{base:curBase});
     cur=r.project;curBase=cur.version;viewPanel='result';render();
-    if(r.ai&&r.ai.protocolOk)toast('复盘完成,看左侧讨论区');
+    if(r.ai&&r.ai.protocolOk)toast('复盘完成，建议已显示在本面板');
     else if(r.ai)toast('复盘回复到了但数据不合规（'+(r.ai.error||'未知')+'），原文留在讨论区,未计入已复盘');
   }catch(e){}
   busy(false);
