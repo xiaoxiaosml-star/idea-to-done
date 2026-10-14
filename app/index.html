@@ -377,8 +377,9 @@ function renderExec(p){
 /* ---- 验证单 ----
  * 口径与 runtime/trial.js、独立工具完全一致(金额按分, 空=未填, 负数/非整数人数标错)。
  * 草稿按事项隔离(localStorage key=项目id): 切换事项不串数据, 刷新保留未保存输入。
- * 草稿记录来源计划版本(spv)+自动带入标记: 换计划后未改动的条件跟随新计划;
- * 有实测/手写内容时保留旧草稿、显式归入旧版本保存, 绝不静默贴当前版本。 */
+ * 草稿记录来源计划版本(spv)+自动带入标记: 换计划后空草稿整套条件跟随新计划;
+ * 有实测/手写的旧草稿整套 v来源版 条件原样保留并显式归入旧版本保存(新条件不混入旧单),
+ * 要按新计划只能点「重新开始」显式重启; 绝不静默贴当前版本。预算文本只认严格单格式, 不猜数。 */
 const TV_IDS=["q1","q2a","q2b","q3","q4","r1","r2","r3","r4","r5","r6","r7","r8","r9","c1","c2","c3"];
 const TV_NUM=["q2a","q2b","r1","r2","r3","r4","r5","r6","r7","r8","r9"];
 const TV_MEASURED=["r1","r2","r3","r4","r5","r6","r7","r8","r9","c1","c2","c3"];
@@ -431,13 +432,28 @@ function tvPreview(){
   box.className='tcalc show';
   box.innerHTML=r.lines.map(l=>'<div class="tl">'+esc(l)+'</div>').join('');
 }
-/* 从计划取自动带入值: 结构化字段优先; 预算原文只在模式清晰时解析(不猜数) */
+/* 预算信息: 结构化字段优先; 预算文本只在整串严格单格式时解析(如「100元」「100元、2小时」);
+   多笔金额/多个时长/带修饰的文本一律不猜, 留空并提示手填确认 */
+function tvBudgetInfo(pl){
+  const hasM=pl.budgetMoney!==null&&pl.budgetMoney!==undefined;
+  const hasT=pl.budgetTime!==null&&pl.budgetTime!==undefined;
+  if(hasM&&hasT)return{money:String(pl.budgetMoney),time:String(pl.budgetTime),note:''};
+  const raw=(pl.budget||'').trim();
+  let bt=null;
+  if(raw){
+    const t=raw.replace(/\s+/g,'');
+    const m=/^(\d+(?:\.\d+)?)元(?:[、,，]?(\d+(?:\.\d+)?)(?:小时|钟头|[hH]))?$/.exec(t);
+    if(m)bt={money:m[1],time:m[2]||null};
+  }
+  const money=hasM?String(pl.budgetMoney):(bt?bt.money:'');
+  const time=hasT?String(pl.budgetTime):((bt&&bt.time)?bt.time:'');
+  const note=((money===''||time==='')&&raw)?'（预算原文未能确定数字上限，请手填确认，不替你猜）':'';
+  return{money,time,note};
+}
 function tvPlanAuto(pl){
-  const auto={q1:pl.question||'',q2a:'',q2b:'',q3:pl.continueSignal||'',q4:pl.stop||''};
-  if(pl.budgetMoney!==null&&pl.budgetMoney!==undefined)auto.q2a=String(pl.budgetMoney);
-  else{const m=/(\d+(?:\.\d+)?)\s*元/.exec(pl.budget||'');if(m)auto.q2a=m[1];}
-  if(pl.budgetTime!==null&&pl.budgetTime!==undefined)auto.q2b=String(pl.budgetTime);
-  else{const m=/(\d+(?:\.\d+)?)\s*(?:小时|钟头|[hH])/.exec(pl.budget||'');if(m)auto.q2b=m[1];}
+  const auto={q1:pl.question||'',q3:pl.continueSignal||'',q4:pl.stop||''};
+  const b=tvBudgetInfo(pl);
+  auto.q2a=b.money;auto.q2b=b.time;
   return auto;
 }
 function renderTrial(p){
@@ -453,31 +469,39 @@ function renderTrial(p){
   /* 参照条 */
   if(curPlan){
     ref.style.display='';
-    ref.innerHTML='📌 来自当前执行计划 v'+curPlan.version+'：投入上限「'+esc(curPlan.budget)+'」'
+    const bnote=tvBudgetInfo(curPlan).note;
+    ref.innerHTML='📌 来自当前执行计划 v'+curPlan.version+'：投入上限「'+esc(curPlan.budget)+'」'+bnote
       +(curPlan.continueSignal?'｜支持继续「'+esc(curPlan.continueSignal)+'」':'｜⚠️ 计划未写明支持继续的信号——可回讨论区让 Skill 澄清')
       +'｜该停就停「'+esc(curPlan.stop)+'」——判断条件自动带入，不用重抄。';
   }else ref.style.display='none';
-  /* 计划版本变化: 未改动的自动字段跟随新计划; 有实测/手写内容则显式归入旧版本 */
+  /* 计划版本变化的分支语义(复验拍板):
+     - 空草稿(无实测/手写): 整套判断条件跟随新计划, 来源切到新版本;
+     - 有实测/手写的旧草稿: 整套 v来源版 条件与实测原样保留, 普通渲染绝不让新计划条件混入,
+       保存时归入 v来源版; 要按新计划只能点「按新计划重新开始」显式重启;
+     - 计划出现前就有内容(spv=null): 空着的条件栏按当前计划补齐, 归入当前版本(无旧版可保) */
   banner.style.display='none';
   if(curPlan){
     const pv=curPlan.version;
     const hasUser=TV_MEASURED.some(k=>D.values[k].trim())||TV_AUTO.some(k=>D.touched[k]);
-    if(D.spv===null&&!hasUser){
+    if(D.spv===null){
       const auto=tvPlanAuto(curPlan);
-      for(const k of TV_AUTO){D.values[k]=auto[k];D.auto[k]=auto[k];}
+      if(!hasUser){
+        for(const k of TV_AUTO){D.values[k]=auto[k];D.auto[k]=auto[k];}
+      }else{
+        for(const k of TV_AUTO){if(!D.touched[k]&&D.values[k]===''){D.values[k]=auto[k];D.auto[k]=auto[k];}}
+      }
       D.spv=pv;D.mode='new';
     }else if(D.spv!==pv){
-      const auto=tvPlanAuto(curPlan);
-      for(const k of TV_AUTO){if(!D.touched[k]){D.values[k]=auto[k];D.auto[k]=auto[k];}}
-      if(D.spv===null){
-        /* 计划出现前就有内容: 直接按新计划入籍,不算旧版本草稿 */
-        D.spv=pv;D.mode='new';
-      }else if(hasUser){
+      if(hasUser){
         D.mode='old';
         banner.style.display='';
-        banner.innerHTML='⚠️ 这份草稿基于计划 v'+D.spv+'（当前已执行 v'+pv+'）：没动过的判断条件已按新计划更新；你填的实测/手写内容保留，<b>保存时归入 v'+D.spv+'</b>，不会静默贴成新版本。'
-          +'<div class="toolbar" style="margin-top:6px"><button class="mini" onclick="tvRestartDraft()">🔄 按新计划重新开始（清空实测栏）</button></div>';
-      }else{D.spv=pv;D.mode='new';}
+        banner.innerHTML='⚠️ 这份草稿属于计划 v'+D.spv+'（当前已执行 v'+pv+'）：这张单的判断条件（验证问题/投入上限/继续信号/停止线）和实测数字全部按 v'+D.spv+' 原样保留，<b>保存时归入 v'+D.spv+'</b>，不会把 v'+pv+' 的条件混进这张单。'
+          +'<div class="toolbar" style="margin-top:6px"><button class="mini" onclick="tvRestartDraft()">🔄 按新计划 v'+pv+' 重新开始（清空实测栏，改用 v'+pv+' 条件）</button></div>';
+      }else{
+        const auto=tvPlanAuto(curPlan);
+        for(const k of TV_AUTO){D.values[k]=auto[k];D.auto[k]=auto[k];}
+        D.spv=pv;D.mode='new';
+      }
     }
   }
   /* 草稿即真相: 回填表单(输入事件实时同步草稿, 两者不打架) */
