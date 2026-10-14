@@ -150,8 +150,11 @@
             <summary style="cursor:pointer;font-size:13px;color:var(--muted)">✏️ 写一份计划草案（已有计划直接开始 / 修改AI草案）</summary>
             <label>要验证什么</label><input type="text" id="pfQuestion">
             <label>具体动作（能今天就开干的）</label><input type="text" id="pfAction">
-            <label>做到什么程度算完</label><input type="text" id="pfAccept">
-            <label>投入上限（时间/钱，写数字）</label><input type="text" id="pfBudget">
+            <label>做到什么程度算完（完成标准，只证明动作做完）</label><input type="text" id="pfAccept">
+            <label>支持继续的信号（出现什么实测结果说明这事值得继续，区别于完成标准）</label><input type="text" id="pfContinueSignal">
+            <label>投入上限（时间/钱，写原文）</label><input type="text" id="pfBudget">
+            <label>钱上限（元，纯数字；写不出确定的数就留空，不许猜）</label><input type="text" id="pfBudgetMoney">
+            <label>时间上限（小时，纯数字）</label><input type="text" id="pfBudgetTime">
             <label>出现什么结果该停</label><input type="text" id="pfStop">
             <label>要带回的证据</label><input type="text" id="pfEvidence">
             <div class="toolbar"><button class="ghost" onclick="saveDraft()">存为草案（待确认）</button></div>
@@ -182,6 +185,7 @@
           <h2>🧾 首次小生意验证单</h2>
           <div class="sub" style="margin-bottom:8px">实测后填结果，自动算三笔账（利润/时间/现金）。同一事项内归档，复盘时 Skill 直接读这些数字。口径与《首次小生意验证单》工具一致。</div>
           <div class="tref" id="tvRef" style="display:none"></div>
+          <div class="tref" id="tvBanner" style="display:none;border-color:var(--warn);background:#fdf3e0"></div>
           <label>1. 验证什么</label>
           <input type="text" id="tvQ1">
           <div class="tgrid">
@@ -284,8 +288,10 @@ async function loadList(){
 
 /* ---- 工作页 ---- */
 async function openProject(id){
+  tvSaveDraft();          /* 切换前保留原事项未保存的验证单草稿 */
   const d=await api('/api/projects/'+id);
   cur=d.project;curBase=cur.version;
+  curDraft=null;          /* 进入新事项时按事项恢复草稿 */
   go('work');
   render();
 }
@@ -327,7 +333,8 @@ function planProtoHtml(d,confirmed){
     <div class="planfield"><b>要验证</b>${esc(d.question)}</div>
     <div class="planfield"><b>具体动作</b>${esc(d.action)}</div>
     <div class="planfield"><b>做到算完</b>${esc(d.accept)}</div>
-    <div class="planfield"><b>投入上限</b>${esc(d.budget)}</div>
+    <div class="planfield"><b>支持继续</b>${esc(d.continueSignal)||'（未写明——可让 Skill 澄清）'}</div>
+    <div class="planfield"><b>投入上限</b>${esc(d.budget)}${d.budgetMoney!=null?'（钱 '+esc(d.budgetMoney)+' 元）':''}${d.budgetTime!=null?'（时间 '+esc(d.budgetTime)+' 小时）':''}</div>
     <div class="planfield"><b>该停就停</b>${esc(d.stop)}</div>
     <div class="planfield"><b>带回证据</b>${esc(d.evidenceToBring)}</div></div>`;
 }
@@ -336,7 +343,8 @@ function renderPlan(p){
   const fields=d=>`<div class="planfield"><b>要验证</b>${esc(d.question)}</div>
     <div class="planfield"><b>具体动作</b>${esc(d.action)}</div>
     <div class="planfield"><b>做到算完</b>${esc(d.accept)}</div>
-    <div class="planfield"><b>投入上限</b>${esc(d.budget)}</div>
+    <div class="planfield"><b>支持继续</b>${esc(d.continueSignal)||'—（可让 Skill 澄清）'}</div>
+    <div class="planfield"><b>投入上限</b>${esc(d.budget)}${d.budgetMoney!=null?'（钱 '+esc(d.budgetMoney)+' 元）':''}${d.budgetTime!=null?'（时间 '+esc(d.budgetTime)+' 小时）':''}</div>
     <div class="planfield"><b>该停就停</b>${esc(d.stop)}</div>
     <div class="planfield"><b>带回证据</b>${esc(d.evidenceToBring)}</div>`;
   let h='';
@@ -353,8 +361,8 @@ function renderPlan(p){
   el.innerHTML=h;
   /* 预填表单: 有草案填草案,方便修改 */
   const src=p.planDraft||p.plan||{};
-  for(const[k,id]of[['question','pfQuestion'],['action','pfAction'],['accept','pfAccept'],['budget','pfBudget'],['stop','pfStop'],['evidenceToBring','pfEvidence']])
-    document.getElementById(id).value=src[k]||'';
+  for(const[k,id]of[['question','pfQuestion'],['action','pfAction'],['accept','pfAccept'],['continueSignal','pfContinueSignal'],['budget','pfBudget'],['budgetMoney','pfBudgetMoney'],['budgetTime','pfBudgetTime'],['stop','pfStop'],['evidenceToBring','pfEvidence']])
+    document.getElementById(id).value=src[k]==null?'':String(src[k]);
 }
 function renderExec(p){
   const el=document.getElementById('wExecList');
@@ -366,10 +374,21 @@ function renderExec(p){
     ${e.note?`<div class="em">备注:${esc(e.note)}</div>`:''}</div>`).join('');
 }
 
-/* ---- 验证单: 口径与 runtime/trial.js、独立工具完全一致(金额按分, 空=未填, 负数标红) ---- */
+/* ---- 验证单 ----
+ * 口径与 runtime/trial.js、独立工具完全一致(金额按分, 空=未填, 负数/非整数人数标错)。
+ * 草稿按事项隔离(localStorage key=项目id): 切换事项不串数据, 刷新保留未保存输入。
+ * 草稿记录来源计划版本(spv)+自动带入标记: 换计划后未改动的条件跟随新计划;
+ * 有实测/手写内容时保留旧草稿、显式归入旧版本保存, 绝不静默贴当前版本。 */
 const TV_IDS=["q1","q2a","q2b","q3","q4","r1","r2","r3","r4","r5","r6","r7","r8","r9","c1","c2","c3"];
 const TV_NUM=["q2a","q2b","r1","r2","r3","r4","r5","r6","r7","r8","r9"];
+const TV_MEASURED=["r1","r2","r3","r4","r5","r6","r7","r8","r9","c1","c2","c3"];
+const TV_AUTO=["q1","q2a","q2b","q3","q4"];
 const TV_EL={q1:'tvQ1',q2a:'tvQ2a',q2b:'tvQ2b',q3:'tvQ3',q4:'tvQ4',r1:'tvR1',r2:'tvR2',r3:'tvR3',r4:'tvR4',r5:'tvR5',r6:'tvR6',r7:'tvR7',r8:'tvR8',r9:'tvR9',c1:'tvC1',c2:'tvC2',c3:'tvC3'};
+let curDraft=null;   /* {spv,values:{},auto:{},touched:{},mode:'new'|'old',_pid} */
+function tvKey(id){return 'chengshi-trial-draft:'+id;}
+function tvSaveDraft(){if(cur&&curDraft&&curDraft._pid===cur.id){try{localStorage.setItem(tvKey(cur.id),JSON.stringify(curDraft));}catch(_){}}}
+function tvLoadDraft(id){try{const s=localStorage.getItem(tvKey(id));const d=s?JSON.parse(s):null;return d&&d.values?d:null;}catch(_){return null;}}
+function tvBlankDraft(){const values={};TV_IDS.forEach(k=>values[k]='');return {spv:null,values,auto:{},touched:{},mode:'new'};}
 function tvVal(k){return document.getElementById(TV_EL[k]).value}
 function tvCents(raw){
   if(raw.trim()==='')return{s:'empty',c:null};
@@ -378,10 +397,10 @@ function tvCents(raw){
   return{s:'ok',c:Math.round(v*100)};
 }
 function tvInt(raw){
-  if(raw.trim()==='')return{s:'empty',c:null};
-  const v=parseInt(raw,10);
-  if(isNaN(v)||v<0)return{s:'bad',c:null};
-  return{s:'ok',c:v};
+  const t=raw.trim();
+  if(t==='')return{s:'empty',c:null};
+  if(!/^\d+$/.test(t))return{s:'bad',c:null};   /* 与服务端同口径: 人数/单数只认非负整数, 小数/负号/混杂字符标错, 不静默截断 */
+  return{s:'ok',c:parseInt(t,10)};
 }
 function tvYuan(c){return (c/100).toFixed(2)}
 function tvCompute(){
@@ -407,42 +426,107 @@ function tvCompute(){
 function tvPreview(){
   const box=document.getElementById('tvCalc');
   const r=tvCompute();
-  if(r.bad){box.className='tcalc show';box.innerHTML='<div class="tl" style="color:var(--bad)">⚠️ 存在无效输入：金额不能为负，请检查。</div>';return;}
+  if(r.bad){box.className='tcalc show';box.innerHTML='<div class="tl" style="color:var(--bad)">⚠️ 存在无效输入：人数/单数必须是整数，金额不能为负，请检查。</div>';return;}
   if(r.incomplete){box.className='tcalc';box.innerHTML='';return;}
   box.className='tcalc show';
   box.innerHTML=r.lines.map(l=>'<div class="tl">'+esc(l)+'</div>').join('');
 }
+/* 从计划取自动带入值: 结构化字段优先; 预算原文只在模式清晰时解析(不猜数) */
+function tvPlanAuto(pl){
+  const auto={q1:pl.question||'',q2a:'',q2b:'',q3:pl.continueSignal||'',q4:pl.stop||''};
+  if(pl.budgetMoney!==null&&pl.budgetMoney!==undefined)auto.q2a=String(pl.budgetMoney);
+  else{const m=/(\d+(?:\.\d+)?)\s*元/.exec(pl.budget||'');if(m)auto.q2a=m[1];}
+  if(pl.budgetTime!==null&&pl.budgetTime!==undefined)auto.q2b=String(pl.budgetTime);
+  else{const m=/(\d+(?:\.\d+)?)\s*(?:小时|钟头|[hH])/.exec(pl.budget||'');if(m)auto.q2b=m[1];}
+  return auto;
+}
 function renderTrial(p){
-  /* 计划参照条 + 空栏自动带入已确认计划(只填空栏,不覆盖已写内容) */
   const ref=document.getElementById('tvRef');
-  if(p.plan&&p.plan.status==='confirmed'){
+  const banner=document.getElementById('tvBanner');
+  const curPlan=(p.plan&&p.plan.status==='confirmed')?p.plan:null;
+  /* 进入事项: 恢复该事项草稿(没有则空表) */
+  if(!curDraft||curDraft._pid!==p.id){
+    curDraft=tvLoadDraft(p.id)||tvBlankDraft();
+    curDraft._pid=p.id;
+  }
+  const D=curDraft;
+  /* 参照条 */
+  if(curPlan){
     ref.style.display='';
-    ref.innerHTML='📌 来自当前执行计划 v'+p.plan.version+'：投入上限「'+esc(p.plan.budget)+'」｜做到算完「'+esc(p.plan.accept)+'」｜该停就停「'+esc(p.plan.stop)+'」——判断条件不用重抄，下方自动带入。';
-    const fill={q1:p.plan.question,q3:p.plan.accept,q4:p.plan.stop};
-    for(const k in fill){const el=document.getElementById(TV_EL[k]);if(!el.value.trim()&&fill[k])el.value=fill[k];}
-  }else{ref.style.display='none';}
+    ref.innerHTML='📌 来自当前执行计划 v'+curPlan.version+'：投入上限「'+esc(curPlan.budget)+'」'
+      +(curPlan.continueSignal?'｜支持继续「'+esc(curPlan.continueSignal)+'」':'｜⚠️ 计划未写明支持继续的信号——可回讨论区让 Skill 澄清')
+      +'｜该停就停「'+esc(curPlan.stop)+'」——判断条件自动带入，不用重抄。';
+  }else ref.style.display='none';
+  /* 计划版本变化: 未改动的自动字段跟随新计划; 有实测/手写内容则显式归入旧版本 */
+  banner.style.display='none';
+  if(curPlan){
+    const pv=curPlan.version;
+    const hasUser=TV_MEASURED.some(k=>D.values[k].trim())||TV_AUTO.some(k=>D.touched[k]);
+    if(D.spv===null&&!hasUser){
+      const auto=tvPlanAuto(curPlan);
+      for(const k of TV_AUTO){D.values[k]=auto[k];D.auto[k]=auto[k];}
+      D.spv=pv;D.mode='new';
+    }else if(D.spv!==pv){
+      const auto=tvPlanAuto(curPlan);
+      for(const k of TV_AUTO){if(!D.touched[k]){D.values[k]=auto[k];D.auto[k]=auto[k];}}
+      if(D.spv===null){
+        /* 计划出现前就有内容: 直接按新计划入籍,不算旧版本草稿 */
+        D.spv=pv;D.mode='new';
+      }else if(hasUser){
+        D.mode='old';
+        banner.style.display='';
+        banner.innerHTML='⚠️ 这份草稿基于计划 v'+D.spv+'（当前已执行 v'+pv+'）：没动过的判断条件已按新计划更新；你填的实测/手写内容保留，<b>保存时归入 v'+D.spv+'</b>，不会静默贴成新版本。'
+          +'<div class="toolbar" style="margin-top:6px"><button class="mini" onclick="tvRestartDraft()">🔄 按新计划重新开始（清空实测栏）</button></div>';
+      }else{D.spv=pv;D.mode='new';}
+    }
+  }
+  /* 草稿即真相: 回填表单(输入事件实时同步草稿, 两者不打架) */
+  for(const k of TV_IDS)document.getElementById(TV_EL[k]).value=D.values[k];
   /* 已存验证单列表 */
   const list=document.getElementById('tvList');
   const ts=p.trials||[];
   if(!ts.length){list.innerHTML='<div class="empty" style="padding:10px 0">还没有保存过验证单。填完点「保存验证单」。</div>';}
-  else list.innerHTML=ts.map(t=>'<div class="trial"><div class="th">🧾 '+t.at.slice(0,16).replace('T',' ')+' ｜ 关联 [计划v'+(t.planVersion||0)+']'+(t.planVersion===(p.plan&&p.plan.version)?'（当前计划）':'（历史版本）')+'</div>'
+  else list.innerHTML=ts.map(t=>'<div class="trial"><div class="th">🧾 '+t.at.slice(0,16).replace('T',' ')+' ｜ 关联 [计划v'+(t.planVersion||0)+']'+(curPlan&&t.planVersion===curPlan.version?'（当前计划）':'（历史版本）')+'</div>'
     +t.lines.map(l=>'<div class="tl">'+esc(l)+'</div>').join('')+'</div>').join('');
-  /* 复盘提示 */
   document.getElementById('reviewHint').textContent=ts.length?'复盘时会带上这 '+ts.length+' 份验证单的三笔账实测数字。':'';
+  tvSaveDraft();
   tvPreview();
+}
+function tvRestartDraft(){
+  const D=curDraft;if(!D)return;
+  const curPlan=(cur.plan&&cur.plan.status==='confirmed')?cur.plan:null;
+  for(const k of TV_MEASURED)D.values[k]='';
+  D.touched={};
+  if(curPlan){const auto=tvPlanAuto(curPlan);for(const k of TV_AUTO){D.values[k]=auto[k];D.auto[k]=auto[k];}D.spv=curPlan.version;}
+  D.mode='new';
+  tvSaveDraft();
+  if(cur)render();
 }
 async function saveTrial(){
   const inputs={};for(const k of TV_IDS)inputs[k]=tvVal(k);
+  const curPlan=(cur.plan&&cur.plan.status==='confirmed')?cur.plan:null;
+  let pv=curPlan?curPlan.version:0;
+  if(curDraft&&curDraft.mode==='old'&&Number.isInteger(curDraft.spv)){
+    /* 归入草稿来源版本; 该版本已不可考(既非当前也无留档)时回退当前版本 */
+    const hist=(cur.planHistory||[]).map(h=>h.version);
+    if(curDraft.spv===pv||hist.includes(curDraft.spv))pv=curDraft.spv;
+  }
   busy(true);
   try{
-    const d=await api('/api/projects/'+cur.id+'/trials',{base:curBase,inputs});
+    const d=await api('/api/projects/'+cur.id+'/trials',{base:curBase,inputs,planVersion:pv});
     cur=d.project;curBase=cur.version;render();
     const pl=d.trial.lines.find(l=>l.indexOf('净利')>0);
-    toast(pl?'验证单已保存：净利 '+pl.split('净利 ')[1].split(' 元')[0]+' 元，复盘时 Skill 会读到':'验证单已保存（利润账未填齐），复盘时 Skill 会读到');
+    toast(pl?'验证单已保存（计划v'+d.trial.planVersion+'）：净利 '+pl.split('净利 ')[1].split(' 元')[0]+' 元，复盘时 Skill 会读到':'验证单已保存（计划v'+d.trial.planVersion+'，利润账未填齐），复盘时 Skill 会读到');
   }catch(e){}
   busy(false);
 }
-TV_IDS.forEach(k=>document.getElementById(TV_EL[k]).addEventListener('input',tvPreview));
+TV_IDS.forEach(k=>document.getElementById(TV_EL[k]).addEventListener('input',()=>{
+  if(!curDraft)return;
+  curDraft.values[k]=document.getElementById(TV_EL[k]).value;
+  curDraft.touched[k]=true;
+  tvSaveDraft();
+  tvPreview();
+}));
 
 /* ---- 动作 ---- */
 async function sendMessage(preset){
@@ -472,7 +556,9 @@ async function confirmPlan(){
 }
 async function saveDraft(){
   const body={question:document.getElementById('pfQuestion').value,action:document.getElementById('pfAction').value,
-    accept:document.getElementById('pfAccept').value,budget:document.getElementById('pfBudget').value,
+    accept:document.getElementById('pfAccept').value,continueSignal:document.getElementById('pfContinueSignal').value,
+    budget:document.getElementById('pfBudget').value,
+    budgetMoney:document.getElementById('pfBudgetMoney').value,budgetTime:document.getElementById('pfBudgetTime').value,
     stop:document.getElementById('pfStop').value,evidenceToBring:document.getElementById('pfEvidence').value,
     author:'user',base:curBase};
   if(!body.action.trim()){toast('至少把"具体动作"写上');return;}

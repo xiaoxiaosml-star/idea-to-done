@@ -49,10 +49,27 @@ function validateProtocol(obj){
     const need=['question','action','accept','budget','stop','evidenceToBring'];
     const miss=need.filter(k=>!isStr(obj[k]));
     if(miss.length)return {ok:false,error:'plan.missing:'+miss.join(',')};
+    /* 结构化带入字段(可选, 兼容旧计划): 钱/时间上限必须是清晰非负数字, 拒绝含糊文本, 不猜数 */
+    const num=v=>{
+      if(typeof v==='number')return isFinite(v)&&v>=0?v:null;
+      if(typeof v==='string'&&/^\d+(\.\d+)?$/.test(v.trim()))return Number(v.trim());
+      return null;
+    };
+    let budgetMoney=null,budgetTime=null;
+    if(obj.budgetMoney!==undefined&&obj.budgetMoney!==null&&obj.budgetMoney!==''){
+      budgetMoney=num(obj.budgetMoney);
+      if(budgetMoney===null)return {ok:false,error:'plan.budgetMoney-invalid'};
+    }
+    if(obj.budgetTime!==undefined&&obj.budgetTime!==null&&obj.budgetTime!==''){
+      budgetTime=num(obj.budgetTime);
+      if(budgetTime===null)return {ok:false,error:'plan.budgetTime-invalid'};
+    }
     return {ok:true,type:t,data:{
       question:obj.question.trim(),action:obj.action.trim(),accept:obj.accept.trim(),
       budget:obj.budget.trim(),stop:obj.stop.trim(),evidenceToBring:obj.evidenceToBring.trim(),
-      reason:isStr(obj.reason)?obj.reason.trim():'',methodRef:isStr(obj.methodRef)?obj.methodRef.trim():''
+      reason:isStr(obj.reason)?obj.reason.trim():'',methodRef:isStr(obj.methodRef)?obj.methodRef.trim():'',
+      budgetMoney,budgetTime,
+      continueSignal:isStr(obj.continueSignal)?obj.continueSignal.trim():''
     }};
   }
   if(t==='review'){

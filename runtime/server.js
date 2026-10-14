@@ -17,7 +17,7 @@ const ROOT=process.env.CHENGSHI_ROOT||path.resolve(__dirname,'..');  /* 随包�
 const APP=path.join(ROOT,'app');
 const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop');
 const PROJ=path.join(DATA,'projects');
-const VERSION='0.1.2-stage2';
+const VERSION='0.1.3-stage2';
 const SKILL_CMD=process.env.CHENGSHI_SKILL||'/chengshi-workshop:idea-to-done';
 fs.mkdirSync(PROJ,{recursive:true});
 
@@ -79,12 +79,19 @@ function contextBlock(p){
     const pl=p.plan;
     L.push('【已确认计划(v'+pl.version+',当前执行中)】'
       +'\n要验证：'+pl.question+'\n动作：'+pl.action+'\n完成标准：'+pl.accept
-      +'\n投入上限：'+pl.budget+'\n停止条件：'+pl.stop+'\n要带回的证据：'+pl.evidenceToBring);
+      +'\n投入上限：'+pl.budget
+      +(pl.budgetMoney!==null&&pl.budgetMoney!==undefined?'（钱 '+pl.budgetMoney+' 元）':'')
+      +(pl.budgetTime!==null&&pl.budgetTime!==undefined?'（时间 '+pl.budgetTime+' 小时）':'')
+      +'\n支持继续的信号：'+(pl.continueSignal||'（计划未写明，需向用户澄清）')
+      +'\n停止条件：'+pl.stop+'\n要带回的证据：'+pl.evidenceToBring);
   }
   if(p.planDraft){
     const d=p.planDraft;
     L.push('【待确认新草案(v'+d.version+',尚未生效)】\n要验证：'+d.question+'\n动作：'+d.action
-      +'\n完成标准：'+d.accept+'\n投入上限：'+d.budget+'\n停止条件：'+d.stop+'\n要带回的证据：'+d.evidenceToBring
+      +'\n完成标准：'+d.accept+'\n投入上限：'+d.budget
+      +(d.budgetMoney!=null?'（钱 '+d.budgetMoney+' 元）':'')+(d.budgetTime!=null?'（时间 '+d.budgetTime+' 小时）':'')
+      +'\n支持继续的信号：'+(d.continueSignal||'（未写明）')
+      +'\n停止条件：'+d.stop+'\n要带回的证据：'+d.evidenceToBring
       +(d.reason?'\n说明：'+d.reason:''));
   }
   if(p.executions.length){
@@ -93,9 +100,18 @@ function contextBlock(p){
   }
   if(p.trials&&p.trials.length){
     const yuan=c=>(c/100).toFixed(2);
-    L.push('【首次小生意验证单 · 实测输入与三笔账,按时间顺序】\n'+p.trials.map((t,i)=>{
+    /* 原始实测必须完整带(空=未填, 与0区分); 三笔账摘要只是补充, 缺项不能遮掉其他已知事实 */
+    const raw=t=>{
       const q=t.inputs,n=t.nums;
-      return `${i+1}. [计划v${t.planVersion||0}·${t.at.slice(0,10)}]\n   验证什么:${q.q1||'未填'}｜最多投入:${n.q2a!==null?yuan(n.q2a):'?'} 元 / ${n.q2b!==null?yuan(n.q2b):'?'} 小时\n   继续信号:${q.q3||'未填'}｜停止条件:${q.q4||'未填'}\n   结果:${q.c1||'未填'}｜数字:${q.c2||'未填'}｜结论:${q.c3||'未填'}\n   ${t.lines.join('\n   ')}`;
+      const money=k=>n[k]===null?'未填':yuan(n[k]);
+      const cnt=k=>n[k]===null?'未填':n[k];
+      return '原始实测：触达 '+cnt('r1')+' 人｜成交 '+cnt('r2')+' 单｜营业额 '+money('r3')+' 元｜已售成本 '+money('r4')
+        +' 元｜其他费用 '+money('r5')+' 元｜投入时间 '+(n.r6===null?'未填':(n.r6/100))+' 小时｜实际收到 '+money('r7')
+        +' 元｜实际支付 '+money('r8')+' 元｜剩余库存 '+money('r9')+' 元';
+    };
+    L.push('【首次小生意验证单 · 实测记录,按时间顺序】\n'+p.trials.map((t,i)=>{
+      const q=t.inputs;
+      return `${i+1}. [计划v${t.planVersion||0}·${t.at.slice(0,10)}]\n   验证什么:${q.q1||'未填'}｜最多投入:${t.nums.q2a!==null?yuan(t.nums.q2a):'?'} 元 / ${t.nums.q2b!==null?yuan(t.nums.q2b):'?'} 小时\n   支持继续的信号:${q.q3||'（未填）'}｜停止条件:${q.q4||'未填'}\n   ${raw(t)}\n   这周动作:${q.c1||'未填'}｜结果数字:${q.c2||'未填'}｜结论:${q.c3||'未填'}\n   三笔账：\n   ${t.lines.join('\n   ')}`;
     }).join('\n'));
   }
   if(p.decision)L.push('【当前结局决定】'+({done:'达成',go:'继续验证',pause:'暂停',stop:'终止'})[p.decision.type]+'：'+p.decision.reason);
@@ -105,7 +121,7 @@ const CONTRACT=`【运行环境】你在「成事工坊」本地工作台里被�
 【纪律】区分事实与假设，不把假设记成事实；不凭聊天判断市场已可行；计划草案必须等用户在网页上确认后才生效，你不替用户确认计划或结局；不要改动或撤销用户已确认的计划。
 【数据协议】每一轮都是独立回复：不要复述之前轮次说过的内容，只回应当前任务与最新信息。正文写给用户看，语气直接、少客套。正文之后必须另起一行输出且只输出一个 fenced code block（以三个反引号加 json 开头、以三个反引号结尾，块不完整视为接口故障），内容只含以下三种之一，不要输出任何其他 JSON 块：
 {"type":"questions","items":["当前最影响判断的问题"]}            —— 信息不足以出计划时
-{"type":"plan","question":"本计划要验证什么","action":"具体动作(能今天就开干的)","accept":"做到什么程度算完","budget":"投入上限(时间/钱,写数字)","stop":"出现什么结果该停","evidenceToBring":"要带回的证据"}  —— 信息足够时；这只会成为待确认草案，不会自动替换已确认计划
+{"type":"plan","question":"本计划要验证什么","action":"具体动作(能今天就开干的)","accept":"做到什么程度算完","budget":"投入上限(时间/钱,写数字)","stop":"出现什么结果该停","evidenceToBring":"要带回的证据","budgetMoney":100,"budgetTime":2,"continueSignal":"出现什么实测结果支持继续"}  —— 信息足够时；这只会成为待确认草案，不会自动替换已确认计划。budgetMoney=钱上限(元,纯数字)、budgetTime=时间上限(小时,纯数字)：写得出确定数字才填，写不出就省略字段，不许猜；continueSignal=支持继续的实测信号，必须区别于 accept（完成只证明动作做完，不代表生意值得继续），想清楚再填
 {"type":"review","result":"实际结果对照事前标准","assumptionDelta":"原假设获得或失去的支持","stillUnknown":"仍未知的部分","next":"建议的下一步(必填)","suggest":"continue|adjust|pause|stop"}  —— 复盘时`;
 
 function discussPrompt(p,userText){
@@ -115,14 +131,47 @@ function discussPrompt(p,userText){
       ?'用户已在执行或刚补充了情况。若信息足够给出下一轮计划草案，否则先问最关键的补充问题。'
       :'这是本事项的开场讨论。先澄清事实、假设、未知项与投入边界；信息不足以出计划时，问当前最影响判断的问题（不超过3个）；足够时直接给计划草案。');
 }
+function execHasReal(e){return !!(e&&(e.result&&e.result.trim())||(e.evidence&&e.evidence.trim()));}
+/* 验证单算实测证据: 任一实测字段(r1-r9)已填, 或复盘三行(c1-c3)有内容; 只填事前条件(q1-q4)不算 */
+function trialHasReal(t){
+  if(!t)return false;
+  if(t.nums&&['r1','r2','r3','r4','r5','r6','r7','r8','r9'].some(k=>t.nums[k]!==null&&t.nums[k]!==undefined))return true;
+  const q=t.inputs||{};
+  return !!((q.c1&&q.c1.trim())||(q.c2&&q.c2.trim())||(q.c3&&q.c3.trim()));
+}
 function reviewPrompt(p){
-  const latest=p.executions[p.executions.length-1];
+  /* 统一证据时间线: 执行记录与验证单都能发起复盘, 以最新一条为本次复盘对象 */
+  const items=[
+    ...p.executions.filter(execHasReal).map(e=>({kind:'exec',at:e.at,ref:e})),
+    ...(p.trials||[]).filter(trialHasReal).map(t=>({kind:'trial',at:t.at,ref:t}))
+  ].sort((a,b)=>a.at.localeCompare(b.at));
+  const latest=items[items.length-1];
+  const yuan=c=>(c/100).toFixed(2);
+  let focus='';
+  if(latest.kind==='exec'){
+    const e=latest.ref;
+    focus='最新实测（执行记录·关联计划v'+(e.planVersion||0)+'·'+e.at.slice(0,10)+'）：'
+      +'\n动作：'+e.action+'\n实际投入：'+(e.input||'未填')+'\n结果：'+(e.result||'未填')
+      +'\n证据：'+(e.evidence||'未填')+(e.note?'\n用户备注：'+e.note:'');
+  }else{
+    const t=latest.ref,q=t.inputs,n=t.nums;
+    const money=k=>n[k]===null?'未填':yuan(n[k])+' 元';
+    focus='最新实测（首次小生意验证单·关联计划v'+(t.planVersion||0)+'·'+t.at.slice(0,10)+'）：'
+      +'\n验证什么：'+(q.q1||'未填')
+      +'\n判断条件：支持继续=「'+(q.q3||'未填')+'」；停止=「'+(q.q4||'未填')+'」'
+      +'\n原始输入：触达 '+(n.r1===null?'未填':n.r1)+' 人，成交 '+(n.r2===null?'未填':n.r2)+' 单，营业额 '+money('r3')
+      +'，已售成本 '+money('r4')+'，其他费用 '+money('r5')+'，投入时间 '+(n.r6===null?'未填':(n.r6/100))+' 小时'
+      +'，实际收到 '+money('r7')+'，实际支付 '+money('r8')+'，剩余库存 '+money('r9')
+      +'\n三笔账：\n'+t.lines.join('\n')
+      +'\n这周动作：'+(q.c1||'未填')+'｜结果数字：'+(q.c2||'未填')+'｜结论：'+(q.c3||'未填');
+  }
+  const rest=items.slice(0,-1).length;
   return SKILL_CMD+'\n\n'+CONTRACT+'\n\n'+contextBlock(p)
-    +'\n\n【本次任务】复盘。请针对下面这条最新证据做对照复盘，不要重复之前的回答：'
-    +'\n最新动作：'+latest.action+'\n实际投入：'+(latest.input||'未填')+'\n结果：'+(latest.result||'未填')
-    +'\n证据：'+(latest.evidence||'未填')+(latest.note?'\n用户备注：'+latest.note:'')
+    +'\n\n【本次任务】复盘。请针对下面这条最新实测记录做对照复盘，不要重复之前的回答：'
+    +'\n'+focus
+    +(rest?'（另有 '+rest+' 条较早实测记录见上方上下文，一并参考，但以上面这条为重点）':'')
     +'\n逐条对照事前标准、投入上限与停止条件（含验证单里用户自己写的判断条件），'
-    +'结合上面验证单的三笔账实测数字给出复盘建议；不要只重复账面数字，要判断对照停止/继续条件后该继续、调整、暂停还是停止。'
+    +'结合实测数字给出复盘建议；不要只重复账面数字，要判断对照停止/继续条件后该继续、调整、暂停还是停止。'
     +'给出 review 协议块（next 与 suggest 必填）。';
 }
 
@@ -275,9 +324,21 @@ const server=http.createServer(async(req,res)=>{
           if(!needBase(F))return null;
           const need=['question','action','accept','budget','stop','evidenceToBring'];
           if(need.some(k=>!body[k]||!body[k].trim()))return send(res,400,{error:'plan-fields-required'}),null;
+          const numOrNull=v=>{
+            if(v===undefined||v===null||v==='')return null;
+            const n2=Number(v);
+            return isFinite(n2)&&n2>=0?n2:null;
+          };
+          const bm=numOrNull(body.budgetMoney),bt=numOrNull(body.budgetTime);
+          if((body.budgetMoney!==undefined&&body.budgetMoney!==null&&body.budgetMoney!=='')&&bm===null)
+            return send(res,400,{error:'bad-budgetMoney'}),null;
+          if((body.budgetTime!==undefined&&body.budgetTime!==null&&body.budgetTime!=='')&&bt===null)
+            return send(res,400,{error:'bad-budgetTime'}),null;
           if(F.planDraft)F.planHistory.push({...F.planDraft,archivedAt:new Date().toISOString(),archiveReason:body.reason||'草案被修改'});
           F.planDraft={question:body.question.trim(),action:body.action.trim(),accept:body.accept.trim(),
             budget:body.budget.trim(),stop:body.stop.trim(),evidenceToBring:body.evidenceToBring.trim(),
+            budgetMoney:bm,budgetTime:bt,
+            continueSignal:(body.continueSignal||'').trim(),
             reason:(body.reason||'').trim(),version:F.plan?F.plan.version+1:1,
             author:body.author==='user'?'user':'ai',createdAt:new Date().toISOString()};
           return saveProject(F);
@@ -306,7 +367,8 @@ const server=http.createServer(async(req,res)=>{
         return send(res,200,{project:result,execution:result.executions[result.executions.length-1]});
       }
 
-      /* 首次小生意验证单: 保存实测输入+服务端计算三笔账,关联当前已确认计划版本 */
+      /* 首次小生意验证单: 保存实测输入+服务端计算三笔账。
+       * planVersion 可由页面显式携带(草稿基于旧计划时), 只允许=当前已确认版本或历史留档版本, 杜绝静默贴错版本 */
       if(parts[3]==='trials'&&req.method==='POST'){
         const n=normalizeInputs(body.inputs);
         if(!n.ok)return send(res,400,{error:n.error});
@@ -316,8 +378,18 @@ const server=http.createServer(async(req,res)=>{
           const F=loadProject(id);
           if(!F){send(res,404,{error:'not-found'});return null;}
           if(!needBase(F))return null;
+          const curVer=F.plan&&F.plan.status==='confirmed'?F.plan.version:0;
+          let planVer=curVer;
+          if(body.planVersion!==undefined&&body.planVersion!==null&&body.planVersion!==''){
+            const pv=Number(body.planVersion);
+            const histVers=(F.planHistory||[]).map(h=>h.version);
+            if(!Number.isInteger(pv)||(pv!==curVer&&!histVers.includes(pv))){
+              send(res,400,{error:'bad-plan-version',current:curVer});return null;
+            }
+            planVer=pv;
+          }
           const t={id:'t'+Date.now().toString(36)+crypto.randomBytes(2).toString('hex'),
-            planVersion:F.plan&&F.plan.status==='confirmed'?F.plan.version:0,
+            planVersion:planVer,
             inputs:n.inputs,nums:n.nums,lines:sum.lines,ledger:L,
             at:new Date().toISOString()};
           F.trials.push(t);
@@ -334,7 +406,7 @@ const server=http.createServer(async(req,res)=>{
         if(!entry)return send(res,404,{error:'not-found'});
         if(!needBase(entry))return;
         const entryVersion=entry.version;
-        const hasReal=entry.executions.some(e=>(e.result&&e.result.trim())||(e.evidence&&e.evidence.trim()));
+        const hasReal=entry.executions.some(execHasReal)||(entry.trials||[]).some(trialHasReal);
         if(!hasReal)return send(res,400,{error:'no-real-evidence'});
         if(!entry.sessionId)return send(res,400,{error:'no-session'});
         const r=await callClaude({prompt:reviewPrompt(entry),sessionId:entry.sessionId,cwd:ROOT,methodsRoot:ROOT});

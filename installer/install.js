@@ -111,7 +111,7 @@ log('  插件就绪 ✔(已核对启用状态与组件清单)');
 log('⑥ 准备数据目录(与插件缓存分离,更新不清空)…');
 fs.mkdirSync(path.join(DATA,'projects'),{recursive:true});
 fs.writeFileSync(path.join(DATA,'install.json'),JSON.stringify({
-  installedAt:new Date().toISOString(),version:'0.1.2-stage2',
+  installedAt:new Date().toISOString(),version:'0.1.3-stage2',
   root:ROOT,minClaude:MIN_CLAUDE,claudeFound:verOut
 },null,2));
 
