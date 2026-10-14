@@ -77,22 +77,23 @@
   .trial{border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin-bottom:10px;background:#fff}
   .trial .th{font-size:12px;color:var(--muted);margin-bottom:6px}
   .trial .tl{font-size:13px;margin-bottom:3px}
-  /* 阶段③: 当前阶段突出 + 目标摘要 + 工具折叠 */
-  .psum{font-size:13px;background:#f7f2e8;border:1px dashed var(--wood-lt);border-radius:8px;padding:8px 12px;margin-top:10px;line-height:1.6}
+  /* 阶段③: 常驻摘要+阶段子导航(整体吸顶) + 面板切换 + 工具折叠 */
+  .stickbar{position:sticky;top:53px;z-index:15;background:var(--bg);padding:8px 0 8px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+  .psum{font-size:13px;background:#f7f2e8;border:1px dashed var(--wood-lt);border-radius:8px;padding:7px 12px;margin-bottom:8px;line-height:1.6}
   .psum b{color:var(--wood)}
-  .subnav{display:flex;gap:8px;margin:0 0 14px;position:sticky;top:53px;z-index:15;background:var(--bg);padding:8px 0}
+  .psum details{display:inline-block;font-size:12.5px;color:var(--muted);margin-left:10px}
+  .psum details summary{cursor:pointer;display:inline-block;color:var(--wood);font-weight:600}
+  .subnav{display:flex;gap:8px}
   .subnav button{flex:1;background:transparent;border:1.5px solid var(--line);border-radius:20px;padding:6px 4px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}
-  .subnav button.on{background:#efe4d2;border-color:var(--wood);color:var(--wood)}
-  .card.stage-on{border:1.5px solid var(--wood-lt);box-shadow:0 2px 8px rgba(139,94,52,.12)}
-  .card.stage-on h2{border-left-color:var(--ok)}
-  .stagemark{float:right;font-size:11px;font-weight:700;color:#fff;background:var(--ok);border-radius:12px;padding:2px 10px;margin-top:2px}
+  .subnav button.on{background:var(--wood);border-color:var(--wood);color:#fff}
+  .subnav button i{font-style:normal;font-size:11px;font-weight:400;margin-left:5px;opacity:.85}
   .toolbox>button{width:100%;text-align:left;background:#f7f2e8;border:1px solid var(--line);border-radius:9px;padding:10px 14px;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer;font-family:inherit}
   .toolbox>button .chev{float:right;color:var(--muted)}
   @media(max-width:640px){
     .wrap{padding:16px 12px 70px}
     h1{font-size:19px}
     .topnav button{font-size:13px;padding:8px 2px}
-    .subnav{top:47px}
+    .stickbar{top:47px}
     .subnav button{font-size:12.5px}
     .card{padding:15px 14px}
     .decide-row button{min-width:calc(50% - 8px);font-size:12px}
@@ -145,7 +146,6 @@
       <button class="mini" onclick="go('list')">← 返回我的事</button>
       <h2 style="margin-top:10px" id="wIdea"></h2>
       <div class="statusbar" id="wStatus"></div>
-      <div class="psum" id="wPlanSum" style="display:none"></div>
       <div class="decide-row" id="wDecide">
         <button class="ghost" onclick="decide('done')">🎯 达成</button>
         <button class="ghost" onclick="decide('go')">🚀 继续验证</button>
@@ -153,15 +153,17 @@
         <button class="ghost" onclick="decide('stop')">🛑 终止</button>
       </div>
     </div>
-    <div class="subnav">
-      <button id="snDiscuss" onclick="secGo('cardDiscuss')">💬 讨论</button>
-      <button id="snExec" onclick="secGo('wPlanCard')">🛠 执行</button>
-      <button id="snResult" onclick="secGo('cardResult')">📊 结果</button>
+    <div class="stickbar">
+      <div class="psum" id="wPlanSum" style="display:none"></div>
+      <div class="subnav">
+        <button id="snDiscuss" onclick="switchPanel('discuss')">💬 讨论<i></i></button>
+        <button id="snExec" onclick="switchPanel('exec')">🛠 执行<i></i></button>
+        <button id="snResult" onclick="switchPanel('result')">📊 结果<i></i></button>
+      </div>
     </div>
-    <div class="cols">
-      <div>
+    <div id="panDiscuss">
         <div class="card" id="cardDiscuss">
-          <h2>💬 讨论<span class="stagemark" id="smDiscuss" style="display:none">当前阶段</span></h2>
+          <h2>💬 讨论</h2>
           <div id="wDiscuss"><div class="empty">还没开始讨论</div></div>
           <label>接着说（回答、补充情况、新的疑问）</label>
           <textarea id="wInput" style="min-height:64px"></textarea>
@@ -169,8 +171,8 @@
             <button class="primary" onclick="sendMessage()">发送</button>
           </div>
         </div>
-      </div>
-      <div>
+    </div>
+    <div id="panExec" style="display:none">
         <div class="card" id="wPlanCard">
           <h2>📋 当前计划</h2>
           <div id="wPlan"><div class="empty">还没有计划草案</div></div>
@@ -185,12 +187,13 @@
             <label>时间上限（小时，纯数字）</label><input type="text" id="pfBudgetTime">
             <label>出现什么结果该停</label><input type="text" id="pfStop">
             <label>要带回的证据</label><input type="text" id="pfEvidence">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:14px"><input type="checkbox" id="pfTool" style="width:auto;margin:0"> 适用工具：首次小生意验证单（仅当这是面向陌生成交的小生意小试、要算成交/成本/利润时才勾，让工作台自动展开该工具）</label>
             <div class="toolbar"><button class="ghost" onclick="saveDraft()">存为草案（待确认）</button></div>
           </details>
         </div>
         <div class="card" id="cardExec">
-          <h2>📥 执行与证据<span class="stagemark" id="smExec" style="display:none">当前阶段</span></h2>
-          <div id="wExecList"></div>
+          <h2>📥 记录真实结果</h2>
+          <div class="sub" style="margin-bottom:4px">做完计划里的动作，把真实发生的情况记在这里；全部证据、对照和复盘入口在「结果」面板。</div>
           <label>动作（对应计划里的哪一步）</label>
           <input type="text" id="eAction">
           <label>实际投入（时间/钱，写数字）</label>
@@ -247,15 +250,19 @@
           <div id="tvList" style="margin-top:12px"></div>
           </div>
         </div>
+    </div>
+    <div id="panResult" style="display:none">
         <div class="card" id="cardResult">
-          <h2>📊 结果与复盘<span class="stagemark" id="smResult" style="display:none">当前阶段</span></h2>
-          <div id="wResult"></div>
+          <h2>📊 结果与复盘</h2>
+          <div id="wLatest"></div>
+          <label style="margin-top:16px">全部真实记录（执行 + 验证单）</label>
+          <div id="wExecList"></div>
+          <div id="wTrialSum"></div>
           <div class="toolbar">
             <button class="ghost" onclick="doReview()">🫱 带着结果继续讨论（复盘）</button>
           </div>
           <div class="sub" id="reviewHint" style="margin-top:6px"></div>
         </div>
-      </div>
     </div>
   </div>
 </div>
@@ -302,7 +309,7 @@ async function createProject(mode){
       /* 开场由 Skill 主动澄清,不让用户先写计划 */
       await sendMessage('【新念头】'+idea+'\n我现在没有计划,请先按成事方法论帮我理清:这事要投入之前,你最需要向我澄清的是什么?');
     }else{
-      toast('已建好事项,在右侧直接写你的计划');
+      toast('已建好事项,在执行面板直接写你的计划');
     }
   }catch(e){/*已提示*/}
   busy(false);
@@ -326,6 +333,7 @@ async function loadList(){
 async function openProject(id){
   tvSaveDraft();          /* 切换前保留原事项未保存的验证单草稿 */
   tvUserOpen=null;        /* 折叠状态不跨事项携带, 按新事项适用性决定 */
+  viewPanel=null;         /* 查看面板不跨事项携带, 按新事项阶段决定 */
   const d=await api('/api/projects/'+id);
   cur=d.project;curBase=cur.version;
   curDraft=null;          /* 进入新事项时按事项恢复草稿 */
@@ -343,55 +351,85 @@ function render(){
     +(p.sessionId?' ｜ 独立会话 '+p.sessionId.slice(0,8):'')
     +(p.plan&&p.plan.status==='confirmed'?' ｜ 计划 v'+p.plan.version+' 已确认':'')
     +(p.decision?' ｜ 理由：'+esc(p.decision.reason):'');
-  renderPlanSum(p);renderStage(p);renderResult(p);
+  renderPlanSum(p);renderPanel(p);renderResult(p);
   renderDiscuss(p);renderPlan(p);renderExec(p);renderTrial(p);
 }
-/* 常驻目标摘要: 已确认计划的当前下一步, 不随滚动消失 */
+/* 常驻目标摘要(紧凑条, 吸顶在阶段导航上方): 始终露当前动作+投入上限, 其余条件折叠查看 */
 function renderPlanSum(p){
   const el=document.getElementById('wPlanSum');
   const pl=p.plan&&p.plan.status==='confirmed'?p.plan:null;
   if(!pl){el.style.display='none';return;}
   el.style.display='';
-  el.innerHTML='🎯 当前下一步：<b>'+esc(pl.action)+'</b>　｜　做到算完：'+esc(pl.accept)
-    +'　｜　投入上限：'+esc(pl.budget)
-    +(pl.continueSignal?'　｜　支持继续：'+esc(pl.continueSignal):'')
-    +'　｜　该停就停：'+esc(pl.stop)
-    +'　<span class="sub">（计划 v'+pl.version+'）</span>';
+  el.innerHTML='🎯 当前下一步：<b>'+esc(pl.action)+'</b>　｜　投入上限：'+esc(pl.budget)
+    +(pl.tool==='trial'?'　｜　🧾 适用验证单工具':'')
+    +'　<details><summary>全部条件</summary>'
+    +'<div>做到算完：'+esc(pl.accept)+'</div>'
+    +(pl.continueSignal?'<div>支持继续：'+esc(pl.continueSignal)+'</div>':'<div>支持继续：（计划未写明，可让 Skill 澄清）</div>')
+    +'<div>该停就停：'+esc(pl.stop)+'</div>'
+    +'<div>要验证：'+esc(pl.question)+'</div>'
+    +'<div class="sub">计划 v'+pl.version+'　｜　'+new Date(pl.confirmedAt||'').toLocaleString()+'</div>'
+    +'</details>';
 }
-/* 阶段子导航: 默认突出当前阶段(讨论/执行/结果), 点 chip 平滑滚动 */
-function secGo(id){const el=document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});}
-function renderStage(p){
-  const stage=p.decision?'result':(p.stage==='discuss'?'discuss':(p.stage==='review'?'result':'exec'));
-  const map={discuss:{sn:'snDiscuss',scroll:'cardDiscuss',mark:'smDiscuss',hl:'cardDiscuss'},
-             exec:{sn:'snExec',scroll:'wPlanCard',mark:'smExec',hl:'cardExec'},
-             result:{sn:'snResult',scroll:'cardResult',mark:'smResult',hl:'cardResult'}};
+/* 面板切换: 查看面板(viewPanel)与事项真实阶段(p.stage)分开表达, 互不改写。
+   默认面板跟随事项阶段; 用户点导航只改查看, 不动阶段。 */
+let viewPanel=null;
+function switchPanel(k){viewPanel=k;tvSaveDraft();if(cur)renderPanel(cur);}
+function curPanel(p){return viewPanel||(p.decision?'result':(p.stage==='discuss'?'discuss':(p.stage==='review'?'result':'exec')));}
+function renderPanel(p){
+  const vp=curPanel(p);
+  document.getElementById('panDiscuss').style.display=vp==='discuss'?'':'none';
+  document.getElementById('panExec').style.display=vp==='exec'?'':'none';
+  document.getElementById('panResult').style.display=vp==='result'?'':'none';
+  const exN=p.executions.length, tvN=(p.trials||[]).length;
+  const planState=p.plan&&p.plan.status==='confirmed'?('v'+p.plan.version+' 执行中'):(p.planDraft?'草案待确认':'无计划');
+  const labels={discuss:'💬 讨论<i>'+p.discussion.length+' 条</i>',
+    exec:'🛠 执行<i>'+esc(planState)+'</i>',
+    result:'📊 结果<i>证据 '+(exN+tvN)+'</i>'};
   for(const k of ['discuss','exec','result']){
-    const on=k===stage, m=map[k];
-    document.getElementById(m.sn).classList.toggle('on',on);
-    document.getElementById(m.hl).classList.toggle('stage-on',on);
-    document.getElementById(m.mark).style.display=on?'':'none';
+    const btn=document.getElementById('sn'+k[0].toUpperCase()+k.slice(1));
+    btn.classList.toggle('on',k===vp);
+    btn.innerHTML=labels[k]+(k===vp?'<i>·查看中</i>':'');
   }
 }
-/* 结果区: 证据清单 + 最新一条 + 结局 + 复盘入口 */
+/* 结果区: 最新一条=有效执行记录∪有效验证单按时间取最新(与后台复盘同口径);
+   空表单/仅事前条件的验证单不冒充实测。 */
+function exHasReal(e){return !!((e.result||'').trim()||(e.evidence||'').trim());}
+function tvHasReal(t){
+  const inp=t.inputs||{};
+  return ['r1','r2','r3','r4','r5','r6','r7','r8','r9'].some(k=>inp[k]!==null&&inp[k]!==undefined&&inp[k]!=='')
+    ||['c1','c2','c3'].some(k=>typeof inp[k]==='string'?inp[k].trim()!=='':(inp[k]!==null&&inp[k]!==undefined));
+}
 function renderResult(p){
-  const el=document.getElementById('wResult');
   const exN=p.executions.length, tvN=(p.trials||[]).length;
-  let h='<div class="planfield"><b>执行记录</b>'+exN+' 条'+(tvN?'　｜　🧾 验证单 '+tvN+' 份':'')+'</div>';
-  const latest=tvN?p.trials[tvN-1]:(exN?p.executions[exN-1]:null);
+  const items=[];
+  p.executions.filter(exHasReal).forEach(e=>items.push({at:e.at,kind:'exec',ref:e}));
+  (p.trials||[]).filter(tvHasReal).forEach(t=>items.push({at:t.at,kind:'trial',ref:t}));
+  items.sort((a,b)=>String(a.at).localeCompare(String(b.at)));
+  const latest=items.length?items[items.length-1]:null;
+  let h='<div class="planfield"><b>证据合计</b>执行记录 '+exN+' 条'+(tvN?'　｜　🧾 验证单 '+tvN+' 份':'')+'</div>';
   if(latest){
-    if(latest.lines){
-      h+='<div class="exitem"><div class="ea">🧾 最新验证单（计划 v'+(latest.planVersion||0)+'）</div>'
-        +latest.lines.slice(0,4).map(l=>'<div class="em" style="color:var(--ink)">'+esc(l)+'</div>').join('')+'</div>';
+    if(latest.kind==='trial'){
+      const t=latest.ref;
+      h+='<div class="exitem"><div class="ea">🧾 最新实测：验证单（计划 v'+(t.planVersion||0)+'）｜ '+esc(String(t.at).slice(0,16).replace('T',' '))+'</div>'
+        +t.lines.slice(0,4).map(l=>'<div class="em" style="color:var(--ink)">'+esc(l)+'</div>').join('')+'</div>';
     }else{
-      h+='<div class="exitem"><div class="ea">📥 最新执行记录</div><div class="em">'+esc(latest.at.slice(0,16).replace('T',' '))+' ｜ 投入:'+esc(latest.input||'—')+'</div>'
-        +(latest.result?'<div style="font-size:13px;margin-top:4px">'+esc(latest.result)+'</div>':'')
-        +(latest.evidence?'<div class="ev">证据:'+esc(latest.evidence)+'</div>':'')+'</div>';
+      const e=latest.ref;
+      h+='<div class="exitem"><div class="ea">📥 最新实测：执行记录 ｜ '+esc(String(e.at).slice(0,16).replace('T',' '))+'</div>'
+        +'<div class="em">动作:'+esc(e.action)+'　｜　投入:'+esc(e.input||'—')+'</div>'
+        +(e.result?'<div style="font-size:13px;margin-top:4px">'+esc(e.result)+'</div>':'')
+        +(e.evidence?'<div class="ev">证据:'+esc(e.evidence)+'</div>':'')+'</div>';
     }
   }else{
-    h+='<div class="empty" style="padding:12px 0">还没有证据。做完动作后，去「执行」区记下第一条真实结果。</div>';
+    h+='<div class="empty" style="padding:12px 0">还没有真实证据。做完动作后，去「执行」面板记下第一条结果。</div>';
   }
   if(p.decision)h+='<div class="planfield" style="margin-top:8px"><b>结局</b>'+{done:'🎯 达成',go:'🚀 继续验证',pause:'⏸ 暂停',stop:'🛑 终止'}[p.decision.type]+'　'+esc(p.decision.reason)+'</div>';
-  el.innerHTML=h;
+  document.getElementById('wLatest').innerHTML=h;
+  /* 验证单紧凑清单(与执行记录并列, 全量明细仍在执行面板的工具里) */
+  const ts=p.trials||[];
+  document.getElementById('wTrialSum').innerHTML=ts.length
+    ?'<label>🧾 验证单（'+ts.length+' 份）</label>'+ts.map(t=>'<div class="trial"><div class="th">🧾 '+String(t.at).slice(0,16).replace('T',' ')+' ｜ 关联 [计划v'+(t.planVersion||0)+']</div>'
+      +t.lines.slice(0,3).map(l=>'<div class="tl">'+esc(l)+'</div>').join('')+'</div>').join('')
+    :'';
 }
 function renderDiscuss(p){
   const el=document.getElementById('wDiscuss');
@@ -421,7 +459,8 @@ function planProtoHtml(d,confirmed){
     <div class="planfield"><b>支持继续</b>${esc(d.continueSignal)||'（未写明——可让 Skill 澄清）'}</div>
     <div class="planfield"><b>投入上限</b>${esc(d.budget)}${d.budgetMoney!=null?'（钱 '+esc(d.budgetMoney)+' 元）':''}${d.budgetTime!=null?'（时间 '+esc(d.budgetTime)+' 小时）':''}</div>
     <div class="planfield"><b>该停就停</b>${esc(d.stop)}</div>
-    <div class="planfield"><b>带回证据</b>${esc(d.evidenceToBring)}</div></div>`;
+    <div class="planfield"><b>带回证据</b>${esc(d.evidenceToBring)}</div>
+    ${d.tool==='trial'?'<div class="planfield"><b>适用工具</b>🧾 首次小生意验证单</div>':''}</div>`;
 }
 function renderPlan(p){
   const el=document.getElementById('wPlan');
@@ -431,7 +470,8 @@ function renderPlan(p){
     <div class="planfield"><b>支持继续</b>${esc(d.continueSignal)||'—（可让 Skill 澄清）'}</div>
     <div class="planfield"><b>投入上限</b>${esc(d.budget)}${d.budgetMoney!=null?'（钱 '+esc(d.budgetMoney)+' 元）':''}${d.budgetTime!=null?'（时间 '+esc(d.budgetTime)+' 小时）':''}</div>
     <div class="planfield"><b>该停就停</b>${esc(d.stop)}</div>
-    <div class="planfield"><b>带回证据</b>${esc(d.evidenceToBring)}</div>`;
+    <div class="planfield"><b>带回证据</b>${esc(d.evidenceToBring)}</div>
+    ${d.tool==='trial'?'<div class="planfield"><b>适用工具</b>🧾 首次小生意验证单</div>':''}`;
   let h='';
   if(p.plan){
     h+=`<div class="proto" style="border-color:var(--ok)"><div class="pt" style="color:var(--ok)">✅ 执行中计划（已确认）</div>${fields(p.plan)}
@@ -448,6 +488,7 @@ function renderPlan(p){
   const src=p.planDraft||p.plan||{};
   for(const[k,id]of[['question','pfQuestion'],['action','pfAction'],['accept','pfAccept'],['continueSignal','pfContinueSignal'],['budget','pfBudget'],['budgetMoney','pfBudgetMoney'],['budgetTime','pfBudgetTime'],['stop','pfStop'],['evidenceToBring','pfEvidence']])
     document.getElementById(id).value=src[k]==null?'':String(src[k]);
+  document.getElementById('pfTool').checked=src.tool==='trial';
 }
 function renderExec(p){
   const el=document.getElementById('wExecList');
@@ -604,11 +645,12 @@ function renderTrial(p){
   tvPreview();
 }
 /* 验证单工具折叠: 不是每件事都铺开大表。
-   展开条件 = 带投入上限(结构化钱/时间)的小试计划 | 草稿已有内容 | 存过验证单 | 用户手动点开 */
+   展开条件 = 计划显式标记 tool==='trial'(面向陌生成交的小生意小试) | 草稿已有实测/手写内容
+   | 存过验证单 | 用户手动点开。有预算≠做生意, 不靠预算字段或念头关键词猜。 */
 let tvUserOpen=null;
 function tvApplicable(p,D){
   const pl=p.plan&&p.plan.status==='confirmed'?p.plan:null;
-  if(pl&&(pl.budgetMoney!==null&&pl.budgetMoney!==undefined||pl.budgetTime!==null&&pl.budgetTime!==undefined))return true;
+  if(pl&&pl.tool==='trial')return true;
   if(TV_MEASURED.some(k=>D.values[k].trim())||TV_AUTO.some(k=>D.touched[k]))return true;
   if((p.trials||[]).length)return true;
   return false;
@@ -680,7 +722,7 @@ async function confirmPlan(){
   busy(true);
   try{
     const d=await api('/api/projects/'+cur.id+'/plan/confirm',{base:curBase,reason});
-    cur=d.project;curBase=cur.version;render();toast('计划已确认,去做,然后把真实结果记下来');
+    cur=d.project;curBase=cur.version;viewPanel='exec';render();toast('计划已确认,去做,然后把真实结果记下来');
   }catch(e){}
   busy(false);
 }
@@ -689,6 +731,7 @@ async function saveDraft(){
     accept:document.getElementById('pfAccept').value,continueSignal:document.getElementById('pfContinueSignal').value,
     budget:document.getElementById('pfBudget').value,
     budgetMoney:document.getElementById('pfBudgetMoney').value,budgetTime:document.getElementById('pfBudgetTime').value,
+    tool:document.getElementById('pfTool').checked?'trial':'',
     stop:document.getElementById('pfStop').value,evidenceToBring:document.getElementById('pfEvidence').value,
     author:'user',base:curBase};
   if(!body.action.trim()){toast('至少把"具体动作"写上');return;}
@@ -722,7 +765,7 @@ async function doReview(){
   busy(true);
   try{
     const r=await api('/api/projects/'+cur.id+'/review',{base:curBase});
-    cur=r.project;curBase=cur.version;render();
+    cur=r.project;curBase=cur.version;viewPanel='result';render();
     if(r.ai&&r.ai.protocolOk)toast('复盘完成,看左侧讨论区');
     else if(r.ai)toast('复盘回复到了但数据不合规（'+(r.ai.error||'未知')+'），原文留在讨论区,未计入已复盘');
   }catch(e){}

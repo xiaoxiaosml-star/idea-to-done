@@ -86,6 +86,7 @@ function contextBlock(p){
       +(pl.budgetMoney!==null&&pl.budgetMoney!==undefined?'（钱 '+pl.budgetMoney+' 元）':'')
       +(pl.budgetTime!==null&&pl.budgetTime!==undefined?'（时间 '+pl.budgetTime+' 小时）':'')
       +'\n支持继续的信号：'+(pl.continueSignal||'（计划未写明，需向用户澄清）')
+      +(pl.tool==='trial'?'\n适用工具：首次小生意验证单（本计划是面向陌生成交的小试，工作台会展开该工具）':'')
       +'\n停止条件：'+pl.stop+'\n要带回的证据：'+pl.evidenceToBring);
   }
   if(p.planDraft){
@@ -124,7 +125,7 @@ const CONTRACT=`【运行环境】你在「成事工坊」本地工作台里被�
 【纪律】区分事实与假设，不把假设记成事实；不凭聊天判断市场已可行；计划草案必须等用户在网页上确认后才生效，你不替用户确认计划或结局；不要改动或撤销用户已确认的计划。
 【数据协议】每一轮都是独立回复：不要复述之前轮次说过的内容，只回应当前任务与最新信息。正文写给用户看，语气直接、少客套。正文之后必须另起一行输出且只输出一个 fenced code block（以三个反引号加 json 开头、以三个反引号结尾，块不完整视为接口故障），内容只含以下三种之一，不要输出任何其他 JSON 块：
 {"type":"questions","items":["当前最影响判断的问题"]}            —— 信息不足以出计划时
-{"type":"plan","question":"本计划要验证什么","action":"具体动作(能今天就开干的)","accept":"做到什么程度算完","budget":"投入上限(时间/钱,写数字)","stop":"出现什么结果该停","evidenceToBring":"要带回的证据","budgetMoney":100,"budgetTime":2,"continueSignal":"出现什么实测结果支持继续"}  —— 信息足够时；这只会成为待确认草案，不会自动替换已确认计划。budgetMoney=钱上限(元,纯数字)、budgetTime=时间上限(小时,纯数字)：写得出确定数字才填，写不出就省略字段，不许猜；continueSignal=支持继续的实测信号，必须区别于 accept（完成只证明动作做完，不代表生意值得继续），想清楚再填
+{"type":"plan","question":"本计划要验证什么","action":"具体动作(能今天就开干的)","accept":"做到什么程度算完","budget":"投入上限(时间/钱,写数字)","stop":"出现什么结果该停","evidenceToBring":"要带回的证据","budgetMoney":100,"budgetTime":2,"continueSignal":"出现什么实测结果支持继续","tool":"trial"}  —— 信息足够时；这只会成为待确认草案，不会自动替换已确认计划。budgetMoney=钱上限(元,纯数字)、budgetTime=时间上限(小时,纯数字)：写得出确定数字才填，写不出就省略字段，不许猜；continueSignal=支持继续的实测信号，必须区别于 accept（完成只证明动作做完，不代表生意值得继续），想清楚再填；tool 仅当本计划是面向陌生成交的小生意小试（要记录触达/成交/营业额/成本来算利润账）时才带 "trial"，其他事项一律省略该字段，让工作台按显式标记展开验证单工具
 {"type":"review","result":"实际结果对照事前标准","assumptionDelta":"原假设获得或失去的支持","stillUnknown":"仍未知的部分","next":"建议的下一步(必填)","suggest":"continue|adjust|pause|stop"}  —— 复盘时`;
 
 function discussPrompt(p,userText){
@@ -337,11 +338,14 @@ const server=http.createServer(async(req,res)=>{
             return send(res,400,{error:'bad-budgetMoney'}),null;
           if((body.budgetTime!==undefined&&body.budgetTime!==null&&body.budgetTime!=='')&&bt===null)
             return send(res,400,{error:'bad-budgetTime'}),null;
+          if(body.tool!==undefined&&body.tool!==null&&body.tool!==''&&body.tool!=='trial')
+            return send(res,400,{error:'bad-tool'}),null;
           if(F.planDraft)F.planHistory.push({...F.planDraft,archivedAt:new Date().toISOString(),archiveReason:body.reason||'草案被修改'});
           F.planDraft={question:body.question.trim(),action:body.action.trim(),accept:body.accept.trim(),
             budget:body.budget.trim(),stop:body.stop.trim(),evidenceToBring:body.evidenceToBring.trim(),
             budgetMoney:bm,budgetTime:bt,
             continueSignal:(body.continueSignal||'').trim(),
+            tool:body.tool==='trial'?'trial':'',
             reason:(body.reason||'').trim(),version:F.plan?F.plan.version+1:1,
             author:body.author==='user'?'user':'ai',createdAt:new Date().toISOString()};
           return saveProject(F);

@@ -64,11 +64,17 @@ function validateProtocol(obj){
       budgetTime=num(obj.budgetTime);
       if(budgetTime===null)return {ok:false,error:'plan.budgetTime-invalid'};
     }
+    /* 适用工具标记(可选): 明确声明本计划适用哪种工具, 不靠预算/关键词猜 */
+    let tool='';
+    if(obj.tool!==undefined&&obj.tool!==null&&obj.tool!==''){
+      if(!isStr(obj.tool)||!['trial'].includes(obj.tool.trim()))return {ok:false,error:'plan.tool-invalid'};
+      tool=obj.tool.trim();
+    }
     return {ok:true,type:t,data:{
       question:obj.question.trim(),action:obj.action.trim(),accept:obj.accept.trim(),
       budget:obj.budget.trim(),stop:obj.stop.trim(),evidenceToBring:obj.evidenceToBring.trim(),
       reason:isStr(obj.reason)?obj.reason.trim():'',methodRef:isStr(obj.methodRef)?obj.methodRef.trim():'',
-      budgetMoney,budgetTime,
+      budgetMoney,budgetTime,tool,
       continueSignal:isStr(obj.continueSignal)?obj.continueSignal.trim():''
     }};
   }
