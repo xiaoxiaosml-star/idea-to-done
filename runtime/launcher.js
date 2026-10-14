@@ -13,18 +13,20 @@ const http=require('http');
 const ROOT=path.resolve(__dirname,'..');
 const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop');
 const tray=process.argv.includes('--tray');
+/* 本数据目录指纹: 端口扫描命中别的成事工坊实例(多开/残留)时不误认 */
+const FP=require('crypto').createHash('sha1').update(DATA).digest('hex').slice(0,12);
 
 function readRt(){
   try{return JSON.parse(fs.readFileSync(path.join(DATA,'runtime.json'),'utf8'));}
   catch(_){return null;}
 }
-/* 身份化健康检查: 返回实际可用端口或 null */
+/* 身份化健康检查: 服务身份+数据目录指纹都对, 返回实际可用端口或 null */
 function probe(port){
   return new Promise(res=>{
     const req=http.get({host:'127.0.0.1',port,path:'/api/health',timeout:1200},r=>{
       let b='';r.on('data',d=>b+=d);r.on('end',()=>{
         let ok=false;
-        try{const j=JSON.parse(b);ok=(j.ok===true&&j.service==='chengshi-workshop');}catch(_){}
+        try{const j=JSON.parse(b);ok=(j.ok===true&&j.service==='chengshi-workshop'&&(!j.data||j.data===FP));}catch(_){}
         res(ok?port:null);
       });
     });

@@ -278,9 +278,15 @@ let cur=null, curBase=0;
 function toast(t){const el=document.getElementById('toast');el.textContent=t;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',3600);}
 function busy(on){document.getElementById('busy').style.display=on?'flex':'none';}
 async function api(path,body,method){
-  const r=await fetch(path,{method:method||(body?'POST':'GET'),
-    headers:{'Content-Type':'application/json','x-chengshi-token':TOKEN},
-    body:body?JSON.stringify(body):undefined});
+  let r;
+  try{
+    r=await fetch(path,{method:method||(body?'POST':'GET'),
+      headers:{'Content-Type':'application/json','x-chengshi-token':TOKEN},
+      body:body?JSON.stringify(body):undefined});
+  }catch(e){
+    toast('连接本地服务失败，已填内容保留。请双击桌面「成事工坊」拉起服务后重试');
+    throw e;
+  }
   const d=await r.json().catch(()=>({error:'bad-response'}));
   if(r.status===401){toast('服务鉴权失败,请从启动器重新打开工作台');throw new Error('401');}
   if(r.status===409){toast('数据有更新,已为你刷新');await openProject(cur.id);throw new Error('409');}

@@ -3,7 +3,7 @@
  *       → 生成启动器与快捷方式 → 启动服务并健康检查(健康检查不发起模型调用)。
  * 重复执行=更新: 不动用户数据,只刷新插件与组件。任何一步失败即中止并报真实原因。
  */
-const {spawnSync,execFileSync}=require('child_process');
+const {spawnSync,execFileSync,spawn}=require('child_process');
 const fs=require('fs');
 const path=require('path');
 const os=require('os');
@@ -13,11 +13,18 @@ const ROOT=path.resolve(__dirname,'..');
 const APP_NAME='成事工坊';
 const PLUGIN='chengshi-workshop';
 const MARKET='chengshi-workshop-local';
-const DATA=path.join(os.homedir(),'.chengshi-workshop');
+const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop');
 const LOG=path.join(DATA,'install.log');
 const MIN_CLAUDE='2.0.0';
 
-const log=(...a)=>{const s=a.join(' ');console.log(s);fs.mkdirSync(DATA,{recursive:true});fs.appendFileSync(LOG,'['+new Date().toISOString()+'] '+s+'\n');};
+let logReady=false;
+const log=(...a)=>{const s=a.join(' ');console.log(s);
+  try{fs.mkdirSync(DATA,{recursive:true});fs.appendFileSync(LOG,'['+new Date().toISOString()+'] '+s+'\n');logReady=true;}
+  catch(e){
+    console.log('✘ 数据目录不可用: '+DATA+' — '+(e.code||'')+' '+(e.message||e));
+    console.log('安装中止。请检查该路径(是否被文件占用/权限不足),或用 CHENGSHI_DATA 指定可写目录后重试。');
+    process.exit(1);
+  }};
 const fail=(msg)=>{log('✘ '+msg);log('安装中止。已完成的步骤保留,修好上面这个问题后重新运行本安装器即可。');process.exit(1);};
 /* Node 解析: 优先随包便携运行时,其次系统 PATH */
 function resolveNode(){
@@ -30,7 +37,8 @@ function run(cmd,args,opts={}){
   return {code:r.status,out:(r.stdout||'')+(r.stderr||''),err:r.error};
 }
 function sh(quoted){
-  const r=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',quoted],{encoding:'utf8',windowsHide:true});
+  const ps=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+  const r=spawnSync(ps,['-NoProfile','-NonInteractive','-Command',quoted],{encoding:'utf8',windowsHide:true});
   return {code:r.status,out:(r.stdout||'')+(r.stderr||'')};
 }
 
@@ -78,8 +86,22 @@ log('  登录可用 ✔');
 
 /* ---- 1. 插件注册与安装 ---- */
 log('④ 注册插件分发目录…');
-const mList=run(claudeExe,['plugin','marketplace','list']).out;
-if(mList.includes(MARKET))log('  分发目录已存在,跳过注册');
+const normPath=p=>path.resolve(p).replace(/\\/g,'/').toLowerCase().replace(/\/+$/,'');
+let mList=run(claudeExe,['plugin','marketplace','list']).out;
+let needAdd=!mList.includes(MARKET);
+if(!needAdd){
+  /* 同名分发目录已存在: 必须指向当前这套安装包, 不能沿用别处(如开发仓库)的旧注册 */
+  const seg=(mList.split(MARKET)[1]||'').split('❯')[0];
+  const pm=seg.match(/Source:\s*Directory\s*\(([^)]+)\)/i);
+  if(pm&&normPath(pm[1])!==normPath(ROOT)){
+    log('  检测到同名分发目录指向另一处: '+pm[1]);
+    const rr=run(claudeExe,['plugin','marketplace','remove',MARKET]);
+    if(rr.code!==0)fail('移除旧分发目录失败: '+rr.out.slice(0,300));
+    log('  已移除旧指向,重新注册到当前安装包');
+    needAdd=true;
+  }
+}
+if(!needAdd)log('  分发目录已存在且指向本安装包,跳过注册');
 else{
   const r=run(claudeExe,['plugin','marketplace','add',ROOT]);
   if(r.code!==0||!r.out.includes('uccess'))fail('注册分发目录失败: '+r.out.slice(0,300));
@@ -111,7 +133,7 @@ log('  插件就绪 ✔(已核对启用状态与组件清单)');
 log('⑥ 准备数据目录(与插件缓存分离,更新不清空)…');
 fs.mkdirSync(path.join(DATA,'projects'),{recursive:true});
 fs.writeFileSync(path.join(DATA,'install.json'),JSON.stringify({
-  installedAt:new Date().toISOString(),version:'0.1.4-stage3',
+  installedAt:new Date().toISOString(),version:'0.1.5-stage4',
   root:ROOT,minClaude:MIN_CLAUDE,claudeFound:verOut
 },null,2));
 
@@ -163,14 +185,15 @@ else if(process.stdin.isTTY){
 
 /* ---- 4. 启动服务 + 健康检查(无模型调用) ---- */
 log('⑧ 启动本地服务并健康检查…');
+const FP=require('crypto').createHash('sha1').update(DATA).digest('hex').slice(0,12);
 const health=()=>new Promise(res=>{
   let port=4310;
   try{port=JSON.parse(fs.readFileSync(path.join(DATA,'runtime.json'),'utf8')).port||4310;}catch(_){}
   const req=http.get({host:'127.0.0.1',port,path:'/api/health',timeout:1500},r=>{
     let b='';r.on('data',d=>b+=d);r.on('end',()=>{
       let ok=false;
-      try{const j=JSON.parse(b);ok=(j.ok===true&&j.service==='chengshi-workshop');}catch(_){}
-      res({ok,port,body:b});                                  /* 只认本应用身份,任意200不算 */
+      try{const j=JSON.parse(b);ok=(j.ok===true&&j.service==='chengshi-workshop'&&(!j.data||j.data===FP));}catch(_){}
+      res({ok,port,body:b});                                  /* 只认本应用身份+本数据目录,任意200不算 */
     });
   });
   req.on('timeout',()=>{req.destroy();res({ok:false,port});});
@@ -178,7 +201,9 @@ const health=()=>new Promise(res=>{
 });
 let h=await health();
 if(!h.ok){
-  const detach=spawnSync('cmd.exe',['/c','start','','/min',resolveNode(),path.join(ROOT,'runtime','server.js')],{cwd:ROOT,windowsHide:true});
+  /* 实测: cmd /c start /min 拉起的进程随安装器退出被终止; 直接 detached spawn 才能存活(与 launcher.js 同法) */
+  const child=spawn(resolveNode(),[path.join(ROOT,'runtime','server.js')],{cwd:ROOT,env:process.env,windowsHide:true,stdio:'ignore',detached:true});
+  child.unref();
   for(let i=0;i<20&&!h.ok;i++){await new Promise(r=>setTimeout(r,800));h=await health();}
 }
 if(!h.ok)fail('服务未能启动。请手动运行: node runtime/server.js 查看报错');

@@ -17,7 +17,7 @@ const ROOT=process.env.CHENGSHI_ROOT||path.resolve(__dirname,'..');  /* 随包�
 const APP=path.join(ROOT,'app');
 const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop');
 const PROJ=path.join(DATA,'projects');
-const VERSION='0.1.4-stage3';
+const VERSION='0.1.5-stage4';
 const SKILL_CMD=process.env.CHENGSHI_SKILL||'/chengshi-workshop:idea-to-done';
 fs.mkdirSync(PROJ,{recursive:true});
 
@@ -221,7 +221,7 @@ const server=http.createServer(async(req,res)=>{
     const origin=req.headers.origin;
     if(origin&&!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin))return send(res,403,{error:'bad-origin'});
 
-    if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop'});
+    if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop',data:crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12)});
     if(!P.startsWith('/api/'))return serveStatic(res,P);
     if(req.headers['x-chengshi-token']!==token)return send(res,401,{error:'unauthorized'});
     const parts=P.split('/').filter(Boolean);
