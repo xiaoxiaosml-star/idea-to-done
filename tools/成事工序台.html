@@ -273,23 +273,12 @@
       <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 写做成的一句话 → ② 回顾关键三步，每步配一句"当时幸亏" → ③ 记下最有效一招，收工</div>
       <label>🎯 做成的一句话（时间+结果，和当初的目标对一下）</label>
       <input type="text" id="s5_done" placeholder="例：三个月内夜市摆摊月净赚3000，第79天做到了" oninput="saveS5('done',this.value)">
-      <label>🪜 关键三步（转折点：各写一步 + 一句"当时幸亏做了什么"）</label>
-      <div style="display:flex;gap:6px;margin-top:2px">
-        <input type="text" id="s5_k1" placeholder="第①步：发生了什么" style="flex:2" oninput="saveS5('k1',this.value)">
-        <input type="text" id="s5_l1" placeholder="幸亏当时…" style="flex:2" oninput="saveS5('l1',this.value)">
-      </div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <input type="text" id="s5_k2" placeholder="第②步：发生了什么" style="flex:2" oninput="saveS5('k2',this.value)">
-        <input type="text" id="s5_l2" placeholder="幸亏当时…" style="flex:2" oninput="saveS5('l2',this.value)">
-      </div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <input type="text" id="s5_k3" placeholder="第③步：发生了什么" style="flex:2" oninput="saveS5('k3',this.value)">
-        <input type="text" id="s5_l3" placeholder="幸亏当时…" style="flex:2" oninput="saveS5('l3',this.value)">
-      </div>
+      <label>🗺 来路地图 · 你走过的每一步自动连成线，关键转折从上面圈（⭐ 圈≥3个，各配一句"幸亏当时"）</label>
+      <div id="s5Map" style="border:1px solid var(--line);border-radius:10px;background:#fff;padding:4px 14px;margin:2px 0 4px;max-height:320px;overflow-y:auto"></div>
       <label>⭐ 最有效的一招（下次遇到别的事直接复用的那个）</label>
       <input type="text" id="s5_best" placeholder="例：先摆一天再说——动作永远比完美计划值钱" oninput="saveS5('best',this.value)">
       <div id="s5Stuck" style="display:none;margin-top:10px;background:#fbf6ec;border:1px dashed var(--wood-lt);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--muted)">
-        <b style="color:var(--wood)">想不起关键步？</b>→ 「本周」页有你全部任务卡，按时间从头翻一遍，来路都在里面；做完一张回收一张，复盘就是读自己的档案。
+        <b style="color:var(--wood)">圈不出三个关键转折？</b>→ 从头到尾读一遍上面的来路地图，转折处会自己跳出来；还圈不出＝留下的卡还太少，回前面几关把动作和结果补齐，地图自己会变清楚。
       </div>
       <button class="mini" style="margin-top:8px" onclick="document.getElementById('s5Stuck').style.display=''">😖 想不起来？</button>
     </div>
@@ -519,7 +508,9 @@ function stationMet(s){
     return dn.length>=2&&dn.every(t=>t.evidence&&t.evidence.trim())&&dn.some(t=>t.revise&&t.revise.trim());}
   if(s.id==='s4')return list.some(t=>t.done&&t.mood&&t.mood.trim());
   if(s.id==='s5'){const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
-    return !!state.outcome&&['done','k1','l1','k2','l2','k3','l3','best'].every(k=>g[k]&&g[k].trim());}
+    const keys=g.keys||{};
+    const ids=Object.keys(keys).filter(id=>state.tasks.some(t=>t.id===Number(id)));
+    return !!state.outcome&&!!(g.done&&g.done.trim())&&!!(g.best&&g.best.trim())&&ids.length>=3&&ids.every(id=>keys[id]&&keys[id].trim());}
   return list.some(t=>t.done&&t.evidence);
 }
 function renderPassCond(){
@@ -550,10 +541,12 @@ function renderPassCond(){
   }else if(cur==='s5'){
     const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
     const f=k=>g[k]&&g[k].trim();
+    const keys=g.keys||{};
+    const ids=Object.keys(keys).filter(id=>state.tasks.some(t=>t.id===Number(id)));
     rows=chk(!!state.outcome)+'结局如实选了　'
       +chk(f('done'))+'做成的一句话　'
-      +chk(f('k1')&&f('k2')&&f('k3'))+'关键三步　'
-      +chk(f('l1')&&f('l2')&&f('l3'))+'每步一句"幸亏"　'
+      +chk(ids.length>=3)+'来路地图圈了≥3个关键转折（已圈'+ids.length+'个）　'
+      +chk(ids.length>0&&ids.every(id=>keys[id]&&keys[id].trim()))+'每个关键转折写了"幸亏"　'
       +chk(f('best'))+'最有效一招';
   }else{
     rows=chk(list.some(t=>t.done))+'至少一张卡完成　'+chk(list.some(t=>t.done&&t.evidence))+'写下证据';
@@ -674,6 +667,50 @@ function saveS5(k,v){
   renderPassCond();renderMap();
   if(!persist())toast('⚠️ 存储不可用，请导出备份');
 }
+function s5Keys(){
+  if(!state.goal)state.goal={};
+  if(typeof state.goal.s5!=='object'||!state.goal.s5)state.goal.s5={};
+  if(typeof state.goal.s5.keys!=='object'||!state.goal.s5.keys)state.goal.s5.keys={};
+  return state.goal.s5.keys;
+}
+function renderS5Map(){
+  const el=document.getElementById('s5Map');if(!el)return;
+  const keys=s5Keys();
+  const list=state.tasks.slice().sort((a,b)=>a.id-b.id);
+  if(!list.length){
+    el.innerHTML='<div style="font-size:12px;color:var(--muted);padding:10px 2px">还没有任务卡——先去前面几关各留一张，来路自然就有了</div>';
+    return;
+  }
+  el.innerHTML=list.map(t=>{
+    const st=allStations().find(x=>x.id===t.st);
+    const k=keys[t.id]!==undefined;
+    return '<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 2px;border-bottom:1px dashed var(--line);'+(k?'background:#fbf6ec;border-radius:6px;':'')+'">'
+      +'<button class="mini" style="flex-shrink:0;font-size:13px;'+(k?'background:var(--gold);color:#fff;':'')+'" title="'+(k?'取消圈定':'圈为关键转折')+'" onclick="toggleKey('+t.id+')">'+(k?'★':'☆')+'</button>'
+      +'<div style="flex:1;min-width:0">'
+      +'<div><span class="src">'+esc(st?st.name:t.st)+'</span> '
+      +'<span style="font-size:13px;'+(t.done?'':'color:var(--muted)')+'">'+esc(t.a)+'</span></div>'
+      +'<div style="font-size:11.5px;color:var(--muted);margin-top:2px">'
+      +(t.done?'✅ 做了':'○ 还没做')
+      +(t.evidence?'　📥 '+esc(t.evidence):'')
+      +(t.revise?'　🔧 后来改成：'+esc(t.revise):'')
+      +(t.mood?'　🧠 '+esc(t.mood):'')
+      +'</div>'
+      +(k?'<input type="text" style="font-size:12.5px;padding:6px 9px;margin-top:5px" placeholder="幸亏当时……（没有这句不算关键转折）" value="'+esc(keys[t.id]||'')+'" oninput="saveKey('+t.id+',this.value)">':'')
+      +'</div></div>';
+  }).join('');
+}
+function toggleKey(id){
+  const keys=s5Keys();
+  if(keys[id]!==undefined)delete keys[id];else keys[id]='';
+  if(!persist())toast('⚠️ 存储不可用，请导出备份');
+  renderS5Map();renderPassCond();
+}
+function saveKey(id,v){
+  const keys=s5Keys();
+  keys[id]=v.trim();
+  renderPassCond();
+  if(!persist())toast('⚠️ 存储不可用，请导出备份');
+}
 const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',1700);}
 function allStations(){return STATIONS.concat(state.custom);}
@@ -711,9 +748,14 @@ function renderMap(){
     document.getElementById('certNum').textContent=`已确认 ${passed} / ${total} 个环节`;
     const oc={done:'🎯 目标达成',go:'🚀 验证成立·继续',stop:'🛑 理性终止',explore:'🌫 探索中'};
     document.getElementById('certOutcome').textContent='当前结局：'+(oc[state.outcome]||'未填写');
-    document.getElementById('certRows').innerHTML=sts.map(s=>{
+    let certRowsHtml=sts.map(s=>{
       return `<div><span>${esc(s.no)} · ${esc(s.name)}</span><span>${stationMet(s)?'✅ 已过':'· · ·'}</span></div>`;
     }).join('');
+    const g5=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
+    const k5=g5.keys||{};
+    Object.keys(k5).forEach(id=>{const t=state.tasks.find(x=>x.id===Number(id));
+      if(t&&k5[id]&&k5[id].trim())certRowsHtml+='<div><span>⭐ '+esc(t.a)+'</span><span>'+esc(k5[id])+'</span></div>';});
+    document.getElementById('certRows').innerHTML=certRowsHtml;
     restoreOutcome();
   }else cert.classList.add('hidden');
   document.getElementById('navOutcomeBdg').textContent=certOn?' 🏁':'';
@@ -738,7 +780,8 @@ function openBench(id,m){
   if(isS2)document.getElementById('s2Goal').value=(state.goal&&state.goal.s2)||'';
   if(isS4){renderMoodMenu();}
   if(isS5){const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
-    ['done','k1','l1','k2','l2','k3','l3','best'].forEach(k=>{const el=document.getElementById('s5_'+k);if(el)el.value=g[k]||'';});}
+    ['done','best'].forEach(k=>{const el=document.getElementById('s5_'+k);if(el)el.value=g[k]||'';});
+    renderS5Map();}
   renderPassCond();
   document.getElementById('bench').scrollIntoView({behavior:'smooth',block:'start'});
 }
@@ -832,6 +875,7 @@ function addTask(){
 }
 function renderTasks(){
   const el=document.getElementById('taskList');el.innerHTML='';
+  if(cur==='s5')renderS5Map();
   const list=state.tasks.filter(t=>t.st===cur);
   list.forEach(t=>{
     const d=document.createElement('div');d.className='task'+(t.done?' done':'');
@@ -961,7 +1005,7 @@ function setOutcome(v){
   document.getElementById('outcomeTxt').textContent=v?OUTCOME_TXT[v]:'';
   const oc={done:'目标达成',go:'验证成立·继续',stop:'理性终止',explore:'探索中'};
   document.getElementById('certOutcome').textContent='当前结局：'+(oc[v]||'未填写');
-  renderPassCond();
+  renderPassCond();renderMap();
   persist();
 }
 function restoreOutcome(){
