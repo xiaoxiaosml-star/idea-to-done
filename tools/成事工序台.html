@@ -175,6 +175,7 @@
   <div class="card hidden" id="bench">
     <h2 id="benchTitle"></h2>
     <div id="modeTag" style="display:none;margin-top:6px;font-size:13px;font-weight:600;color:var(--wood);background:#f6ecd9;border:1px solid var(--wood-lt);border-radius:8px;padding:5px 12px"></div>
+    <div id="passCond" style="margin-top:8px;font-size:12.5px;background:#f4f9f4;border:1px solid #cfe3cf;border-radius:8px;padding:8px 12px"></div>
     <div class="blueprint">
       <b class="t">📐 本关图纸 · 看完一条勾一条</b>
       <div id="bpList"></div>
@@ -188,6 +189,7 @@
       </div>
       <div id="modeHint" style="font-size:12.5px;color:var(--muted);margin-top:8px"></div>
     </div>
+    <div id="stdForm">
     <label id="lAction">🔧 这一关我要做的动作（一句话，能今天就开干的）</label>
     <input type="text" id="fAction">
     <label id="lAccept">✔ 做到什么程度算完（写得出"检查过了"的标准）</label>
@@ -197,6 +199,39 @@
     <div class="toolbar">
       <button class="primary" onclick="addTask()">⚒ 生成任务卡</button>
       <button class="ghost" onclick="closeBench()">收起本关</button>
+    </div>
+    </div><!-- /stdForm -->
+
+    <!-- 第零/二/四关专属: 目标拆解=步骤清单 -->
+    <div id="benchS2" class="hidden" style="margin-top:12px">
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 写目标 → ② 拆步骤（每步问：明天能开干吗）→ ③ 全绿了去「本周」开干</div>
+      <label>🎯 目标一句话（做到什么程度算"做成了"）</label>
+      <input type="text" id="s2Goal" placeholder="例：三个月内夜市摆摊做到月净赚3000" oninput="saveGoal(this.value)">
+      <label>🪓 拆出的步骤（写不出？点下面"拆不动了"）</label>
+      <div style="display:flex;gap:6px;margin-top:2px">
+        <input type="text" id="s2A" placeholder="这一步具体做什么" style="flex:2">
+        <input type="text" id="s2C" placeholder="做到什么程度算完" style="flex:2">
+        <button class="mini" onclick="addStep()">＋步</button>
+      </div>
+      <div id="stuckBox" style="display:none;margin-top:10px;background:#fbf6ec;border:1px dashed var(--wood-lt);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--muted)">
+        <b style="color:var(--wood)">拆不动时问这三句：</b>① 这一步要拿到什么<span style="color:var(--wood)">看得见的结果</span>？② <span style="color:var(--wood)">谁</span>来做、<span style="color:var(--wood)">在哪</span>做、花<span style="color:var(--wood)">多少</span>？③ 还答不出＝缺信息，那动作就是"先去搞到这个信息"。<br>
+        <button class="mini" style="margin-top:6px" onclick="fillStep('去问一个正在做这件事的人一个具体问题')">填一个探路步</button>
+      </div>
+      <button class="mini" style="margin-top:8px" onclick="document.getElementById('stuckBox').style.display=''">😖 拆不动了？</button>
+    </div>
+
+    <!-- 心态续航: 情绪一句话 + 最小动作菜单 + 派一个 -->
+    <div id="benchS4" class="hidden" style="margin-top:12px">
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 把情绪写成一句话 → ② 从下面选一个最小动作（不用想！）→ ③ 做完回来打勾</div>
+      <label>🧠 现在最堵的情绪，写成一句话（不修饰）</label>
+      <input type="text" id="moodNote" placeholder="例：一想到要开口问人就浑身发紧">
+      <label>🤏 最小动作——选一个，连选都不想选就点"派一个"</label>
+      <div id="moodMenu" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px"></div>
+      <div class="toolbar">
+        <button class="primary" onclick="addRescue()">🫀 生成救援卡</button>
+        <button class="ghost" onclick="pickRandomMood()">🎲 派一个</button>
+        <button class="ghost" onclick="closeBench()">收起本关</button>
+      </div>
     </div>
     <div id="taskList"></div>
   </div>
@@ -299,7 +334,7 @@ const STATIONS=[
 
 const PKEY='gsc_projects';
 let projects=null;
-function blankState(){return {tasks:[],custom:[],bp:{},outcome:''};}
+function blankState(){return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};}
 function validProjects(p){
   if(!p||!Array.isArray(p.order)||!p.items)return false;
   if(!p.order.length)return false;
@@ -339,7 +374,7 @@ function load(){
     const raw=localStorage.getItem('gsc_state');
     if(!raw)return {tasks:[],custom:[],bp:{},outcome:''};
     const s=JSON.parse(raw);
-    if(validState(s)){if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(s.outcome===undefined)s.outcome='';return s;}
+    if(validState(s)){if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';return s;}
     localStorage.removeItem('gsc_state');
   }catch(e){localStorage.removeItem('gsc_state');}
   return {tasks:[],custom:[],bp:{},outcome:''};
@@ -415,6 +450,76 @@ function deleteProject(){
   persist();refreshProjBar();renderAll();goView('flow');
   toast('已删除，现位于「'+projects.items[projects.current].name+'」');
 }
+function stationMet(s){
+  const list=state.tasks.filter(t=>t.st===s.id);
+  if(s.id==='s2')return !!(state.goal&&state.goal[s.id]&&state.goal[s.id].trim())&&list.length>0&&list.every(t=>t.ready)&&list.some(t=>t.done&&t.evidence);
+  if(s.id==='s4')return list.some(t=>t.done&&t.mood&&t.mood.trim());
+  return list.some(t=>t.done&&t.evidence);
+}
+function renderPassCond(){
+  const el=document.getElementById('passCond');if(!el)return;
+  const s=allStations().find(x=>x.id===cur);
+  if(!s){el.style.display='none';return;}
+  el.style.display='';
+  const list=state.tasks.filter(t=>t.st===cur);
+  const chk=ok=>'<span style="color:'+(ok?'var(--ok)':'var(--muted)')+';font-weight:600">'+(ok?'✓':'○')+'</span> ';
+  let rows;
+  if(cur==='s2'){
+    const g=!!(state.goal&&state.goal.s2&&state.goal.s2.trim());
+    const n=list.length>0,rd=list.length>0&&list.every(t=>t.ready),dn=list.some(t=>t.done&&t.evidence);
+    rows=chk(g)+'目标一句话写死　'+chk(n&&rd)+'每步都标了"明天能开干"（共'+list.length+'步）　'+chk(dn)+'至少一步完成+证据';
+  }else if(cur==='s4'){
+    rows=chk(list.some(t=>t.mood&&t.mood.trim()))+'情绪写了一句话　'+chk(list.some(t=>t.done))+'完成一个最小动作';
+  }else{
+    rows=chk(list.some(t=>t.done))+'至少一张卡完成　'+chk(list.some(t=>t.done&&t.evidence))+'写下证据';
+  }
+  el.innerHTML='🏁 本关盖章条件：'+rows;
+}
+const MOOD_ACTIONS=['倒杯水，站起来喝掉','洗把脸，照镜子十秒','把最堵的事写成一个词','给一个活人发一条消息','出门走五分钟，不看手机','躺下，设10分钟闹钟闭眼'];
+let selMood='';
+function renderMoodMenu(){
+  document.getElementById('moodMenu').innerHTML=MOOD_ACTIONS.map(a=>
+    '<button class="mini'+(a===selMood?' sel':'')+'" onclick="selMoodAction(this)">'+esc(a)+'</button>').join('');
+}
+function selMoodAction(el){
+  selMood=MOOD_ACTIONS.find(a=>a===el.textContent)||'';
+  renderMoodMenu();
+}
+function pickRandomMood(){
+  selMood=MOOD_ACTIONS[Math.floor(Math.random()*MOOD_ACTIONS.length)];
+  renderMoodMenu();toast('派给你：'+selMood);
+}
+function addRescue(){
+  const note=document.getElementById('moodNote').value.trim();
+  if(!note){toast('先把情绪写成一句话');return;}
+  if(!selMood){toast('选一个最小动作，或点"派一个"');return;}
+  state.tasks.push({id:Date.now(),st:cur,a:selMood,mood:note,accept:'做完了',stop:'',slot:'none',done:false});
+  document.getElementById('moodNote').value='';selMood='';renderMoodMenu();
+  if(save()){toast('🫀 救援卡已生成，去「本周」或直接回来打勾');goView('week');}
+}
+function saveGoal(v){
+  if(!state.goal)state.goal={};
+  state.goal.s2=v.trim();
+  renderPassCond();renderMap();
+  if(!persist())toast('⚠️ 存储不可用，请导出备份');
+}
+function addStep(){
+  const a=document.getElementById('s2A').value.trim(),c=document.getElementById('s2C').value.trim();
+  if(!a){toast('先写这一步做什么');return;}
+  state.tasks.push({id:Date.now(),st:'s2',a,accept:c,stop:'',slot:'none',done:false,ready:true});
+  document.getElementById('s2A').value='';document.getElementById('s2C').value='';
+  save();toast('＋一步　记得问自己：明天能开干吗？');
+}
+function fillStep(a){
+  document.getElementById('s2A').value=a;
+  document.getElementById('s2C').value='拿到了一个真实回答（名字/数字/原话）';
+  document.getElementById('s2A').focus();
+}
+function toggleReady(id){
+  const t=state.tasks.find(x=>x.id===id);if(!t)return;
+  t.ready=!t.ready;save();
+  if(!t.ready)toast('这步明天开不了干→继续拆它，或改成"先去搞到信息"');
+}
 const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',1700);}
 function allStations(){return STATIONS.concat(state.custom);}
@@ -429,9 +534,9 @@ function renderMap(){
     const tasks=state.tasks.filter(t=>t.st===s.id);
     const doneAll=tasks.filter(t=>t.done).length;
     const done=tasks.filter(t=>t.done&&t.evidence).length;
-    if(done>0)passed++;
+    if(stationMet(s))passed++;
     const d=document.createElement('div');
-    d.className='node'+(cur===s.id?' on':'')+(done>0?' passed':'');
+    d.className='node'+(cur===s.id?' on':'')+(stationMet(s)?' passed':'');
     d.innerHTML=`<div class="box"><span class="stamp">已确认</span><div class="em">${esc(s.em||'📌')}</div><div class="no">${esc(s.no)}</div><div class="nm">${esc(s.name)}</div><div class="sy">${esc(s.sy||'')}</div><div class="pg">${doneAll}/${tasks.length} 卡${doneAll>done?' · 缺证据':''}</div></div>`;
     d.onclick=()=>openBench(s.id);
     el.appendChild(d);
@@ -453,8 +558,7 @@ function renderMap(){
     const oc={done:'🎯 目标达成',go:'🚀 验证成立·继续',stop:'🛑 理性终止',explore:'🌫 探索中'};
     document.getElementById('certOutcome').textContent='当前结局：'+(oc[state.outcome]||'未填写');
     document.getElementById('certRows').innerHTML=sts.map(s=>{
-      const d=state.tasks.filter(t=>t.st===s.id&&t.done&&t.evidence).length;
-      return `<div><span>${esc(s.no)} · ${esc(s.name)}</span><span>${d>0?'✅ 已过':'· · ·'}</span></div>`;
+      return `<div><span>${esc(s.no)} · ${esc(s.name)}</span><span>${stationMet(s)?'✅ 已过':'· · ·'}</span></div>`;
     }).join('');
     restoreOutcome();
   }else cert.classList.add('hidden');
@@ -469,6 +573,13 @@ function openBench(id,m){
   document.getElementById('forkBox').style.display=s.fork?'':'none';
   renderBp();renderTasks();setMode((s.fork?m:null)||'know',s);
   renderMap();
+  const isS2=id==='s2',isS4=id==='s4';
+  document.getElementById('stdForm').style.display=(isS2||isS4)?'none':'';
+  document.getElementById('benchS2').classList.toggle('hidden',!isS2);
+  document.getElementById('benchS4').classList.toggle('hidden',!isS4);
+  if(isS2)document.getElementById('s2Goal').value=(state.goal&&state.goal.s2)||'';
+  if(isS4){renderMoodMenu();}
+  renderPassCond();
   document.getElementById('bench').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
@@ -567,7 +678,9 @@ function renderTasks(){
     d.innerHTML=`<div class="a"><input type="checkbox" class="chk" ${t.done?'checked':''} onchange="toggleDone(${t.id})"> ${t.recon?'<span class="src" style="background:#eef4ec;color:var(--ok)">🧭 探路</span> ':''}${esc(t.a)}</div>
       ${t.accept?`<div class="meta">✔ 算完：${esc(t.accept)}</div>`:''}
       ${t.stop?`<div class="meta">⛔ 该停：${esc(t.stop)}</div>`:''}
-      ${t.done&&!t.evidence?`<div class="meta" style="color:var(--warn)">⚠️ 写下证据，这关才算过</div>`:''}
+      ${cur==='s2'?`<div class="meta"><label style="display:flex;gap:6px;align-items:center;margin:0;cursor:pointer"><input type="checkbox" class="chk" style="width:15px;height:15px" ${t.ready?'checked':''} onchange="toggleReady(${t.id})"> 明天能直接开干？（勾不上＝还得继续拆）</label></div>`:''}
+      ${cur==='s4'&&t.mood?`<div class="meta">🧠 当时情绪：${esc(t.mood)}</div>`:''}
+      ${t.done&&!t.evidence&&cur!=='s4'?`<div class="meta" style="color:var(--warn)">⚠️ 写下证据，这关才算过</div>`:''}
       <div class="ops"><button class="mini" onclick="delTask(${t.id})">删</button></div>
       ${t.done?`<div style="margin-top:9px;background:#f2f8f2;border:1px dashed #c8dcc8;border-radius:8px;padding:9px 11px">
         <div style="font-size:12px;color:var(--ok);font-weight:600;margin-bottom:4px">📥 结果回收 · 干完不算完，证据才算</div>
@@ -660,7 +773,7 @@ function importJSON(e){
   r.onload=()=>{
     let s=null;try{s=JSON.parse(r.result);}catch(err){toast('文件不是有效 JSON，未导入');e.target.value='';return;}
     if(validState(s)){
-      if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(s.outcome===undefined)s.outcome='';
+      if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';
       state=s;if(save())toast('进度已导入');
     }else toast('文件结构不对，未导入（当前进度未受影响）');
     e.target.value='';
@@ -669,7 +782,7 @@ function importJSON(e){
 }
 function clearAll(){
   if(!confirm('确定清空所有工序和任务卡？不可恢复（可先导出备份）。'))return;
-  state={tasks:[],custom:[],bp:{},outcome:''};cur=null;
+  state={tasks:[],custom:[],bp:{},outcome:'',goal:{}};cur=null;
   document.getElementById('bench').classList.add('hidden');
   if(save())toast('已清空');
 }
@@ -698,7 +811,7 @@ function closeGuide(){document.getElementById('guideMask').style.display='none';
 refreshProjBar();
 if(localStorage.getItem('gsc_seen'))document.getElementById('guideMask').style.display='none';
 
-function renderAll(){renderMap();if(cur){renderBp();renderTasks();}renderWeek();restoreOutcome();}
+function renderAll(){renderMap();if(cur){renderBp();renderTasks();renderPassCond();}renderWeek();restoreOutcome();}
 renderAll();
 </script>
 </body>
