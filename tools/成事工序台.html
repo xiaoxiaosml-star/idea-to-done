@@ -582,6 +582,9 @@ function saveEv(id,k,v){
   const t=state.tasks.find(x=>x.id===id);if(!t)return;
   t[k]=v.trim();
   renderMap();
+  const st=document.getElementById('evStat-'+id);
+  if(st){st.style.color=t.evidence?'var(--ok)':'var(--warn)';
+    st.textContent=t.evidence?'✅ 这关过了——回「工序」流水线，进下一关':'⚠️ 证据还空着：这关不算过，不盖章';}
   if(persist())toast('已记录');
 }
 function toggleDone(id){const t=state.tasks.find(x=>x.id===id);t.done=!t.done;if(save()&&t.done)toast('✅ 过一关成一关');}
@@ -610,7 +613,13 @@ function renderWeek(){
       d.innerHTML=`<input type="checkbox" class="chk" ${t.done?'checked':''} onchange="toggleDone(${t.id})">
         <div style="flex:1"><span style="${t.done?'text-decoration:line-through;color:var(--muted)':''}">${esc(t.a)}</span>
         <div style="font-size:11px;margin-top:2px"><span class="src">${esc(stName(t.st))}</span>
-        <button class="mini" style="margin-left:6px" onclick="moveSlot(${t.id},'none')">移出</button></div></div>`;
+        <button class="mini" style="margin-left:6px" onclick="moveSlot(${t.id},'none')">移出</button></div>
+        ${t.done?`<div style="margin-top:7px;background:#f2f8f2;border:1px dashed #c8dcc8;border-radius:8px;padding:8px 10px">
+          <div style="font-size:11.5px;color:var(--ok);font-weight:600;margin-bottom:3px">📥 结果回收 · 干完不算完，证据才算</div>
+          <input type="text" style="font-size:12px;padding:6px 9px" placeholder="拿到了什么证据？（真实数字 / 原话 / 观察记录）" value="${esc(t.evidence||'')}" oninput="saveEv(${t.id},'evidence',this.value)">
+          <input type="text" style="font-size:12px;padding:6px 9px;margin-top:4px" placeholder="原来的假设要不要改？改成什么？" value="${esc(t.revise||'')}" oninput="saveEv(${t.id},'revise',this.value)">
+          <div id="evStat-${t.id}" style="font-size:11.5px;margin-top:5px;color:${t.evidence?'var(--ok)':'var(--warn)'}">${t.evidence?'✅ 这关过了——回「工序」流水线，进下一关':'⚠️ 证据还空着：这关不算过，不盖章'}</div>
+        </div>`:''}</div>`;
       el.appendChild(d);
     });
   }
