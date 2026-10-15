@@ -31,7 +31,9 @@
   button:hover{transform:translateY(-1px)}
   .primary{background:var(--wood);color:#fff}
   .ghost{background:#ece5d8;color:var(--ink)}
-  .mini{background:#f0ece3;color:var(--muted);font-size:12px;padding:5px 11px}
+  .mini{background:#f0ece3;color:var(--muted);font-size:12px;padding:5px 11px;transition:background .12s,color .12s}
+  .mini.sel{background:var(--wood);color:#fff}
+  .mini.rolling{background:var(--gold);color:#5a4a2f;transform:scale(1.06)}
   .foldbtn{float:right;font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--wood-lt);border-radius:8px;padding:3px 10px}
 
   /* ===== 顶部导航: 四个页面 ===== */
@@ -227,6 +229,7 @@
       <input type="text" id="moodNote" placeholder="例：一想到要开口问人就浑身发紧">
       <label>🤏 最小动作——选一个，连选都不想选就点"派一个"</label>
       <div id="moodMenu" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px"></div>
+      <div id="moodPick" style="display:none;font-size:12.5px;color:var(--wood);background:#f7f2e7;border:1px dashed var(--wood-lt);border-radius:8px;padding:6px 10px;margin:0 0 8px"></div>
       <div class="toolbar">
         <button class="primary" onclick="addRescue()">🫀 生成救援卡</button>
         <button class="ghost" onclick="pickRandomMood()">🎲 派一个</button>
@@ -480,14 +483,41 @@ let selMood='';
 function renderMoodMenu(){
   document.getElementById('moodMenu').innerHTML=MOOD_ACTIONS.map(a=>
     '<button class="mini'+(a===selMood?' sel':'')+'" onclick="selMoodAction(this)">'+esc(a)+'</button>').join('');
+  const pk=document.getElementById('moodPick');
+  if(pk){pk.style.display=selMood?'':'none';
+    pk.innerHTML=selMood?'🎯 这次派给你：<b>'+esc(selMood)+'</b>　→ 生成救援卡，或再派一个':'';}
 }
 function selMoodAction(el){
   selMood=MOOD_ACTIONS.find(a=>a===el.textContent)||'';
   renderMoodMenu();
 }
+let rollingMood=false;
 function pickRandomMood(){
-  selMood=MOOD_ACTIONS[Math.floor(Math.random()*MOOD_ACTIONS.length)];
-  renderMoodMenu();toast('派给你：'+selMood);
+  if(rollingMood)return;
+  const menu=document.getElementById('moodMenu');
+  const chips=[...menu.children];
+  if(!chips.length)return;
+  rollingMood=true;selMood='';
+  chips.forEach(c=>{c.classList.remove('sel');});
+  const pk=document.getElementById('moodPick');if(pk)pk.style.display='none';
+  const final=Math.floor(Math.random()*chips.length);
+  const total=chips.length*3+final;
+  let step=0,pos=0;
+  const tick=()=>{
+    chips.forEach(c=>c.classList.remove('rolling'));
+    chips[pos%chips.length].classList.add('rolling');
+    pos++;step++;
+    const remain=total-step;
+    if(step<total){
+      setTimeout(tick,remain>10?70:(remain>5?130:220));
+    }else{
+      chips.forEach(c=>c.classList.remove('rolling'));
+      selMood=MOOD_ACTIONS[final];
+      renderMoodMenu();
+      rollingMood=false;
+    }
+  };
+  tick();
 }
 function addRescue(){
   const note=document.getElementById('moodNote').value.trim();
