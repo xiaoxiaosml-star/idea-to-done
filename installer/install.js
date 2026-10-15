@@ -186,74 +186,112 @@ else if(process.stdin.isTTY){
 }else{ log('  非交互环境: 保持开机自启现状(默认不新增)'); }
 
 /* ---- 4. 启动服务 + 健康检查(无模型调用) ----
- * 四元严格核对: 服务身份 + 数据目录指纹(data) + 实例指纹(iid) + 版本。
- * 缺指纹旧服务不放行; 同目录旧版本进程只在命令行核实归属后才终止重启。 */
+ * 五元严格核对: 服务身份 + 数据目录指纹(data) + 实例指纹(iid) + 版本 + 安装来源指纹(root)。
+ * 缺指纹旧服务不放行; 同目录旧版本/旧来源进程只在三重链式核实(rt记录来源根→健康回包
+ * 来源指纹→pid命令行脚本绝对路径)之后才终止; 终止失败或旧进程不退出即如实中止,
+ * 一次运行至多启动一次服务, 绝不双开同数据目录。 */
 log('⑧ 启动本地服务并健康检查…');
-const FP=require('crypto').createHash('sha1').update(DATA).digest('hex').slice(0,12);
+const crypto=require('crypto');
+const norm=p=>path.resolve(p).replace(/\\/g,'/').toLowerCase();   /* 归一化口径与 server.js 一致 */
+const FP=crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12);
+const ROOT_FP=crypto.createHash('sha1').update(norm(ROOT)).digest('hex').slice(0,12);
+const FPof=p=>crypto.createHash('sha1').update(norm(p)).digest('hex').slice(0,12);
 const readRt=()=>{try{return JSON.parse(fs.readFileSync(path.join(DATA,'runtime.json'),'utf8'));}catch(_){return null;}};
-const ownsServer=(pid)=>{
-  if(!pid)return false;
+/* 进程归属核实(三重比对, 防 pid 复用误杀别的项目的同名 runtime/server.js):
+   1) CIM 调用本身成功; 2) 只从 stdout 解析脚本绝对路径(stderr 里的文本不放行);
+   3) 归一化后与"期望安装根"下的 runtime/server.js 精确相等。 */
+const ownsServer=(pid,expectedRoot)=>{
+  if(!pid||!expectedRoot)return false;
   const ps=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
   const r=spawnSync(ps,['-NoProfile','-NonInteractive','-Command',
     `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
     {encoding:'utf8',windowsHide:true,timeout:8000});
-  return /runtime[\\\/]server\.js/.test((r.stdout||'')+(r.stderr||''));
+  if(r.error||r.status!==0||!r.stdout)return false;
+  const m=r.stdout.match(/"?([A-Za-z]:[^"\r\n]*?[\\/]runtime[\\/]server\.js)"?/);
+  if(!m)return false;
+  return norm(m[1])===norm(path.join(expectedRoot,'runtime','server.js'));
 };
+/* 终止并确认退出: kill 被拒或旧进程超时未退都返回错误串, 调用方不得再启动新服务 */
+const pause=ms=>{const e=Date.now()+ms;while(Date.now()<e);};
+const killAndConfirm=(pid)=>{
+  try{process.kill(pid);}
+  catch(e){return '终止请求被拒('+(e.code||e.message)+')';}
+  for(let i=0;i<20;i++){
+    const t=spawnSync('tasklist',['/FI','PID eq '+pid,'/NH'],{encoding:'utf8',windowsHide:true});
+    if(t.error||t.status!==0)return '无法确认旧进程是否退出(tasklist 调用失败)';
+    if(!((t.stdout||'')+(t.stderr||'')).includes(String(pid)))return null;   /* 已退出 */
+    pause(400);
+  }
+  return '旧进程未在时限内退出';
+};
+/* full(五元全对)|srclash(同DATA同版本但来源目录不符)|stale(我目录的旧服务)
+ * |other(别的数据目录)|old(缺任一指纹的旧服务)|null(非本服务) */
 const classify=(port)=>new Promise(res=>{
   const req=http.get({host:'127.0.0.1',port,path:'/api/health',timeout:1500},r=>{
     let b='';r.on('data',d=>b+=d);r.on('end',()=>{
       let j=null;try{j=JSON.parse(b);}catch(_){}
-      if(!j||j.ok!==true||j.service!=='chengshi-workshop')return res(null);
-      if(!j.data||!j.iid)return res('old');
+      if(!j||j.ok!==true||j.service!=='chengshi-workshop')return res({c:null});
+      if(!j.data||!j.iid||!j.root)return res({c:'old',j});     /* 缺任一指纹都不放行 */
       const rt=readRt();
-      if(j.data!==FP)return res('other');
-      if(rt&&j.iid!==rt.iid)return res('stale');
-      if(EXPECTED&&j.version!==EXPECTED)return res('stale');
-      res('full');
+      if(j.data!==FP)return res({c:'other',j});
+      if(rt&&j.iid!==rt.iid)return res({c:'stale',j});
+      if(EXPECTED&&j.version!==EXPECTED)return res({c:'stale',j});
+      if(j.root!==ROOT_FP)return res({c:'srclash',j});          /* 同DATA但来自别的安装目录 */
+      res({c:'full',j});
     });
   });
-  req.on('timeout',()=>{req.destroy();res(null);});
-  req.on('error',()=>res(null));
+  req.on('timeout',()=>{req.destroy();res({c:null});});
+  req.on('error',()=>res({c:null}));
 });
 async function findService(){
   const rt=readRt();
   const first=rt&&rt.port?rt.port:4310;
-  let c=await classify(first);
-  if(c==='full')return{port:first};
-  let seen=c;                                               /* 可疑(old/stale)优先于 other, 不被覆盖 */
+  const rank={old:3,stale:3,srclash:3,other:1};               /* 可疑信号优先于 other, 不被覆盖 */
+  let r=await classify(first);
+  if(r.c==='full')return{port:first,seen:r.c,body:r.j};
+  let seen=r.c,body=r.j;
   for(let p=4310;p<=4330;p++){
     if(p===first)continue;
-    c=await classify(p);
-    if(c==='full')return{port:p};
-    if(c&&(seen===null||seen==='other'))seen=c;
+    r=await classify(p);
+    if(r.c==='full')return{port:p,seen:r.c,body:r.j};
+    if(r.c&&(!seen||((rank[r.c]||0)>(rank[seen]||0)))){seen=r.c;body=r.j;}
   }
-  return{port:null,seen};
+  return{port:null,seen,body};
 }
+const spawnOnce=()=>{
+  const child=spawn(resolveNode(),[path.join(ROOT,'runtime','server.js')],{cwd:ROOT,env:process.env,windowsHide:true,stdio:'ignore',detached:true});
+  child.unref();
+};
 let found=await findService();
+let spawned=false;
 if(!found.port){
   const rt=readRt();
-  const killable=(found.seen==='stale'||found.seen==='old')&&rt&&ownsServer(rt.pid);
-  if(killable){
-    log('  检测到本数据目录的旧版服务(已核实进程归属),终止并拉起当前版本…');
-    try{process.kill(rt.pid);}catch(_){}
-    const child=spawn(resolveNode(),[path.join(ROOT,'runtime','server.js')],{cwd:ROOT,env:process.env,windowsHide:true,stdio:'ignore',detached:true});
-    child.unref();
+  /* 可终止重启(三重链式核实, 缺一不可) */
+  const okKill=(found.seen==='stale'||found.seen==='srclash')&&rt&&rt.root
+    &&found.body&&found.body.root===FPof(rt.root)&&ownsServer(rt.pid,rt.root);
+  if(okKill){
+    log('  检测到本数据目录的旧版服务(归属与安装来源已核实),终止并拉起当前版本…');
+    const kerr=killAndConfirm(rt.pid);
+    if(kerr)fail('旧服务终止未成功('+kerr+'),未启动新服务(避免两个服务同写数据目录)。数据不会丢失,请手动处理后再重试。');
+    spawnOnce();spawned=true;                                  /* 旧进程已确认退出才拉新版 */
     for(let i=0;i<25&&!found.port;i++){await new Promise(r=>setTimeout(r,800));found=await findService();}
-  }else if(found.seen==='stale'||found.seen==='old'){
+    if(!found.port)fail('旧服务已终止,但新服务健康检查未通过。未再次启动;请运行 成事工坊.cmd 或手动执行 node runtime/server.js 排查。');
+  }else if(found.seen==='old'||found.seen==='stale'||found.seen==='srclash'){
     /* 归属核实不过: 它可能正占着本数据目录, 盲启第二个服务会双写数据 → 如实中止 */
-    fail('检测到'+({old:'旧版服务(缺少指纹)',stale:'本数据目录的旧进程'}[found.seen])
-      +',但无法核实进程归属,未终止任何进程、也未启动新服务(避免两个服务同写数据目录)。'
+    fail('检测到'+({old:'旧版服务(缺少指纹)',stale:'本数据目录的旧进程',
+      srclash:'其他安装目录的同版本服务',other:'其他数据目录的实例'}[found.seen])
+      +',但无法可靠核实进程归属与安装来源,未终止任何进程、也未启动新服务(避免两个服务同写数据目录)。'
       +'请手动结束残留 node 进程后重试;数据不会丢失。');
   }
 }
-if(!found.port){
-  const child=spawn(resolveNode(),[path.join(ROOT,'runtime','server.js')],{cwd:ROOT,env:process.env,windowsHide:true,stdio:'ignore',detached:true});
-  child.unref();
+if(!found.port&&!spawned){                                    /* 只剩"没服务/只有别人DATA的实例"才全新启动 */
+  spawnOnce();spawned=true;
   for(let i=0;i<20&&!found.port;i++){await new Promise(r=>setTimeout(r,800));found=await findService();}
 }
 if(!found.port){
-  const what={old:'旧版服务(缺少指纹,无法确认归属)',stale:'本数据目录的旧进程(归属核实未通过)',other:'其他数据目录的实例(不影响,但本实例未能启动)'}[found.seen]||'未知原因';
-  fail('服务未能确认。'+what+'。未强行终止任何进程;请手动结束残留 node 进程后重试,数据不会丢失。');
+  const what={old:'旧版服务(缺少指纹,无法确认归属)',stale:'本数据目录的旧进程(归属核实未通过)',
+    srclash:'其他安装目录的同版本服务(来源核实未通过)',other:'其他数据目录的实例(不影响,但本实例未能启动)'}[found.seen]||'未知原因';
+  fail('服务未能确认。'+what+'。本次运行已启动过一次但健康检查未通过,未再次启动。未强行终止任何进程;数据不会丢失。');
 }
 const finalRt=readRt();
 log('  服务健康 ✔ http://127.0.0.1:'+found.port+'/ ｜ v'+EXPECTED+' ｜ 实例 '+String(finalRt&&finalRt.iid||'?')+' ｜ 数据目录指纹 '+FP);

@@ -19,6 +19,10 @@ const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop
 const PROJ=path.join(DATA,'projects');
 /* 版本唯一真源 runtime/version.json, install/launcher 同读; 读不到才退回常量 */
 const VERSION=(()=>{try{return JSON.parse(fs.readFileSync(path.join(__dirname,'version.json'),'utf8')).version;}catch(_){return '0.1.5-stage4';}})();
+/* 安装来源指纹: 本服务由哪个安装目录启动。launcher/install 核对它, 防止旧目录
+ * 的同版本服务被新安装误当 own。归一化口径必须与 launcher/install 的 norm 一致。 */
+const norm=p=>path.resolve(p).replace(/\\/g,'/').toLowerCase();
+const ROOT_FP=crypto.createHash('sha1').update(norm(ROOT)).digest('hex').slice(0,12);
 const SKILL_CMD=process.env.CHENGSHI_SKILL||'/chengshi-workshop:idea-to-done';
 fs.mkdirSync(PROJ,{recursive:true});
 
@@ -226,7 +230,7 @@ const server=http.createServer(async(req,res)=>{
     const origin=req.headers.origin;
     if(origin&&!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin))return send(res,403,{error:'bad-origin'});
 
-    if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop',data:crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12),iid});
+    if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop',data:crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12),iid,root:ROOT_FP});
     if(!P.startsWith('/api/'))return serveStatic(res,P);
     if(req.headers['x-chengshi-token']!==token)return send(res,401,{error:'unauthorized'});
     const parts=P.split('/').filter(Boolean);
@@ -473,7 +477,7 @@ function start(){
     });
     server.listen(pt,'127.0.0.1',()=>{
       port=pt;
-      fs.writeFileSync(rtFile,JSON.stringify({token,port,pid:process.pid,version:VERSION,iid},null,2));
+      fs.writeFileSync(rtFile,JSON.stringify({token,port,pid:process.pid,version:VERSION,iid,root:ROOT},null,2));
       console.log('[成事工坊] 本地服务已启动:');
       console.log('  工作台  http://127.0.0.1:'+pt+'/');
       console.log('  数据目录 '+DATA);
