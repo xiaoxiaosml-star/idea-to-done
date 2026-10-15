@@ -54,7 +54,13 @@
 
 - **直接读**：`chapters/` 下的方法 + `cases/` 的案例
 - **动手时**：打开 [成事工序台](tools/成事工序台.html)——点"你现在是什么状态"进对应工位，填任务卡、排进今天、做完回收证据；或打开 [首次小生意验证单](tools/首次小生意验证单.html)——动手前写四行字，结束后算三笔账（均纯前端，数据只在你本地浏览器；在线版：https://xiaoxiaosml-star.github.io/idea-to-done/tools/成事工序台.html ）
-- **对话式带路**（进阶，需要 Claude Code / Cursor 等 AI agent）：先把**整个仓库**克隆到本地，再在 agent 技能目录软链 `skills/idea-to-done/`（安装步骤见该目录下 SKILL.md）。**只复制 skills 文件夹不带仓库，正文不会跟过去**
+- **对话式带路**（推荐，需要 Claude Code）：获取本仓库代码（`git clone https://github.com/xiaoxiaosml-star/idea-to-done.git` 或下载 ZIP 解压）后，**双击运行 `installer/install.cmd`**——安装器自动检测环境、注册并安装插件、准备数据目录、创建「成事工坊」启动入口。之后从开始菜单或桌面的「成事工坊」启动，它会自动拉起本地服务并打开工作台。支持条件：Windows（首发实测环境）+ 已安装并登录的 Claude Code；讨论走你已登录的 AI 账户计费。
+
+### 更新、数据与故障
+
+- **更新**：重新运行 `installer/install.cmd` 即可，只刷新插件与组件，**不清空你的项目数据**。
+- **数据位置**：项目记录只存在你电脑本机的独立数据目录（默认 `~/.chengshi-workshop`，可用 `CHENGSHI_DATA` 环境变量换位置），与插件缓存分开。讨论时必要的上下文会发送给你正在使用的 AI 服务——本工具不建云账户、不收数据，但「AI 讨论」这一步走你自己的 AI 软件账户与计费。
+- **故障排查**：安装与服务日志在数据目录下的 `install.log`。启动入口报"服务未能确认"时，按屏幕提示手动结束残留 node 进程后重试即可，数据不会丢失。
 
 ## 纠错与投稿
 
