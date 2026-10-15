@@ -230,7 +230,7 @@ const server=http.createServer(async(req,res)=>{
     const origin=req.headers.origin;
     if(origin&&!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin))return send(res,403,{error:'bad-origin'});
 
-    if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop',data:crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12),iid,root:ROOT_FP});
+    if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop',data:crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12),iid,root:ROOT_FP,pid:process.pid});
     if(!P.startsWith('/api/'))return serveStatic(res,P);
     if(req.headers['x-chengshi-token']!==token)return send(res,401,{error:'unauthorized'});
     const parts=P.split('/').filter(Boolean);

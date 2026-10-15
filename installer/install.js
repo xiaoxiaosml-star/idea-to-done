@@ -187,8 +187,8 @@ else if(process.stdin.isTTY){
 
 /* ---- 4. 启动服务 + 健康检查(无模型调用) ----
  * 五元严格核对: 服务身份 + 数据目录指纹(data) + 实例指纹(iid) + 版本 + 安装来源指纹(root)。
- * 缺指纹旧服务不放行; 同目录旧版本/旧来源进程只在三重链式核实(rt记录来源根→健康回包
- * 来源指纹→pid命令行脚本绝对路径)之后才终止; 终止失败或旧进程不退出即如实中止,
+ * 缺指纹旧服务不放行; 同目录旧版本/旧来源进程只在四重链式核实(rt记录来源根→健康回包
+ * 来源指纹→回包pid=rt.pid→pid命令行脚本绝对路径)之后才终止; 终止失败或旧进程不退出即如实中止,
  * 一次运行至多启动一次服务, 绝不双开同数据目录。 */
 log('⑧ 启动本地服务并健康检查…');
 const crypto=require('crypto');
@@ -197,8 +197,21 @@ const FP=crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12);
 const ROOT_FP=crypto.createHash('sha1').update(norm(ROOT)).digest('hex').slice(0,12);
 const FPof=p=>crypto.createHash('sha1').update(norm(p)).digest('hex').slice(0,12);
 const readRt=()=>{try{return JSON.parse(fs.readFileSync(path.join(DATA,'runtime.json'),'utf8'));}catch(_){return null;}};
+/* 按 Windows 命令行参数边界解析(引号保护空格, 空白分参), 区分可执行文件与脚本参数 */
+const parseCmdLine=(s)=>{
+  const args=[];let cur='',q=null;
+  for(const ch of s){
+    if(q){if(ch===q)q=null;else cur+=ch;}
+    else if(ch==='"'||ch==="'")q=ch;
+    else if(/\s/.test(ch)){if(cur){args.push(cur);cur='';}}
+    else cur+=ch;
+  }
+  if(cur)args.push(cur);
+  return args;
+};
 /* 进程归属核实(三重比对, 防 pid 复用误杀别的项目的同名 runtime/server.js):
-   1) CIM 调用本身成功; 2) 只从 stdout 解析脚本绝对路径(stderr 里的文本不放行);
+   1) CIM 调用本身成功; 2) 只从 stdout 解析命令行(stderr 里的文本不放行), 按参数边界
+   取脚本参数(全串必须恰好一个 server.js 参数, 无引号双路径/带引号空格都要对);
    3) 归一化后与"期望安装根"下的 runtime/server.js 精确相等。 */
 const ownsServer=(pid,expectedRoot)=>{
   if(!pid||!expectedRoot)return false;
@@ -207,9 +220,9 @@ const ownsServer=(pid,expectedRoot)=>{
     `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
     {encoding:'utf8',windowsHide:true,timeout:8000});
   if(r.error||r.status!==0||!r.stdout)return false;
-  const m=r.stdout.match(/"?([A-Za-z]:[^"\r\n]*?[\\/]runtime[\\/]server\.js)"?/);
-  if(!m)return false;
-  return norm(m[1])===norm(path.join(expectedRoot,'runtime','server.js'));
+  const scripts=parseCmdLine(r.stdout).filter(a=>/[\\/]runtime[\\/]server\.js$/.test(a));
+  if(scripts.length!==1)return false;
+  return norm(scripts[0])===norm(path.join(expectedRoot,'runtime','server.js'));
 };
 /* 终止并确认退出: kill 被拒或旧进程超时未退都返回错误串, 调用方不得再启动新服务 */
 const pause=ms=>{const e=Date.now()+ms;while(Date.now()<e);};
@@ -266,9 +279,11 @@ let found=await findService();
 let spawned=false;
 if(!found.port){
   const rt=readRt();
-  /* 可终止重启(三重链式核实, 缺一不可) */
+  /* 可终止重启(四重链式核实, 缺一不可): seen=stale/srclash + rt 记录来源根
+   * + 健康回包来源指纹与 rt 一致 + 回包进程就是 rt.pid(防同目录双DATA实例残留错指)
+   * + pid 的命令行脚本路径与 rt 记录来源精确相等 */
   const okKill=(found.seen==='stale'||found.seen==='srclash')&&rt&&rt.root
-    &&found.body&&found.body.root===FPof(rt.root)&&ownsServer(rt.pid,rt.root);
+    &&found.body&&found.body.root===FPof(rt.root)&&found.body.pid===rt.pid&&ownsServer(rt.pid,rt.root);
   if(okKill){
     log('  检测到本数据目录的旧版服务(归属与安装来源已核实),终止并拉起当前版本…');
     const kerr=killAndConfirm(rt.pid);
