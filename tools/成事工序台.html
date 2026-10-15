@@ -134,9 +134,9 @@
     <span style="font-size:13.5px;font-weight:600">📋 当前事项</span>
     <select id="projSel" onchange="switchProject(this.value)" ondblclick="renameProject()" title="切换事项 · 双击可改名" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--wood-lt);font-size:13.5px;background:#fff;font-family:inherit;max-width:280px"></select>
     <button class="mini" onclick="renameProject()" title="改这个名字" style="padding:8px 10px">✏️</button>
-    <button class="mini" onclick="newProject()">＋ 新事项</button>
+    <button class="mini" onclick="newProject()" title="新建一个事项" aria-label="新建事项" style="padding:8px 12px">＋</button>
     
-    <button class="mini" onclick="deleteProject()">删除</button>
+    <button class="mini" onclick="deleteProject()" title="删除当前事项" aria-label="删除事项" style="padding:8px 10px">🗑️</button>
     <span class="sub" style="font-size:12px;margin:0">每个事项有自己的流水线、任务卡和结局，数据只在本机浏览器</span>
   </div>
 
