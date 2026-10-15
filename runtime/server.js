@@ -17,17 +17,21 @@ const ROOT=process.env.CHENGSHI_ROOT||path.resolve(__dirname,'..');  /* 随包�
 const APP=path.join(ROOT,'app');
 const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop');
 const PROJ=path.join(DATA,'projects');
-const VERSION='0.1.5-stage4';
+/* 版本唯一真源 runtime/version.json, install/launcher 同读; 读不到才退回常量 */
+const VERSION=(()=>{try{return JSON.parse(fs.readFileSync(path.join(__dirname,'version.json'),'utf8')).version;}catch(_){return '0.1.5-stage4';}})();
 const SKILL_CMD=process.env.CHENGSHI_SKILL||'/chengshi-workshop:idea-to-done';
 fs.mkdirSync(PROJ,{recursive:true});
 
-/* ---- 运行时状态(端口/token 重启复用) ---- */
-let token,port;
+/* ---- 运行时状态(端口/token/实例指纹 重启复用) ----
+ * iid=本数据目录的实例指纹: 首次启动生成, 之后不变。健康检查带它,
+ * 安装器/启动器用它确认"应答的服务确实拥有这个数据目录", 不靠端口猜测。 */
+let token,port,iid;
 const rtFile=path.join(DATA,'runtime.json');
 try{
   const rt=JSON.parse(fs.readFileSync(rtFile,'utf8'));
-  token=rt.token;port=rt.port;
+  token=rt.token;port=rt.port;iid=rt.iid;
 }catch(_){ token=crypto.randomBytes(16).toString('hex');port=0; }
+if(!iid)iid=crypto.randomBytes(8).toString('hex');
 
 /* ---- 每事项写队列: 同步写入串行化; AI 合并段也走它,但不阻塞 await ---- */
 const queues={};
@@ -222,7 +226,7 @@ const server=http.createServer(async(req,res)=>{
     const origin=req.headers.origin;
     if(origin&&!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin))return send(res,403,{error:'bad-origin'});
 
-    if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop',data:crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12)});
+    if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop',data:crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12),iid});
     if(!P.startsWith('/api/'))return serveStatic(res,P);
     if(req.headers['x-chengshi-token']!==token)return send(res,401,{error:'unauthorized'});
     const parts=P.split('/').filter(Boolean);
@@ -469,7 +473,7 @@ function start(){
     });
     server.listen(pt,'127.0.0.1',()=>{
       port=pt;
-      fs.writeFileSync(rtFile,JSON.stringify({token,port,pid:process.pid,version:VERSION},null,2));
+      fs.writeFileSync(rtFile,JSON.stringify({token,port,pid:process.pid,version:VERSION,iid},null,2));
       console.log('[成事工坊] 本地服务已启动:');
       console.log('  工作台  http://127.0.0.1:'+pt+'/');
       console.log('  数据目录 '+DATA);

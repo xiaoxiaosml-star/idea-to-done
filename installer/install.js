@@ -16,6 +16,8 @@ const MARKET='chengshi-workshop-local';
 const DATA=process.env.CHENGSHI_DATA||path.join(os.homedir(),'.chengshi-workshop');
 const LOG=path.join(DATA,'install.log');
 const MIN_CLAUDE='2.0.0';
+/* 版本唯一真源 runtime/version.json(server/launcher 同读) */
+const EXPECTED=(()=>{try{return JSON.parse(fs.readFileSync(path.join(ROOT,'runtime','version.json'),'utf8')).version;}catch(_){return '0.1.5-stage4';}})();
 
 let logReady=false;
 const log=(...a)=>{const s=a.join(' ');console.log(s);
@@ -133,7 +135,7 @@ log('  插件就绪 ✔(已核对启用状态与组件清单)');
 log('⑥ 准备数据目录(与插件缓存分离,更新不清空)…');
 fs.mkdirSync(path.join(DATA,'projects'),{recursive:true});
 fs.writeFileSync(path.join(DATA,'install.json'),JSON.stringify({
-  installedAt:new Date().toISOString(),version:'0.1.5-stage4',
+  installedAt:new Date().toISOString(),version:EXPECTED,
   root:ROOT,minClaude:MIN_CLAUDE,claudeFound:verOut
 },null,2));
 
@@ -141,8 +143,8 @@ fs.writeFileSync(path.join(DATA,'install.json'),JSON.stringify({
 log('⑦ 生成启动器与快捷方式…');
 const launcher=path.join(ROOT,'成事工坊.cmd');
 fs.writeFileSync(launcher,
-'@echo off\r\nchcp 65001 >nul\r\nset ROOT=%~dp0\r\n' +
-'set NODE=node\r\nif exist "%ROOT%installer\\runtime\\node\\node.exe" set NODE="%ROOT%installer\\runtime\\node\\node.exe"\r\n' +
+'@echo off\r\nchcp 65001 >nul\r\nset "ROOT=%~dp0"\r\n' +
+'set "NODE=node"\r\nif exist "%ROOT%installer\\runtime\\node\\node.exe" set "NODE=%ROOT%installer\\runtime\\node\\node.exe"\r\n' +
 '"%NODE%" "%ROOT%runtime\\launcher.js" %*\r\nif errorlevel 1 pause\r\n'
 ,'utf8');
 const lnkPs=[
@@ -183,31 +185,79 @@ else if(process.stdin.isTTY){
   if(ans)mkStartup();else rmStartup();
 }else{ log('  非交互环境: 保持开机自启现状(默认不新增)'); }
 
-/* ---- 4. 启动服务 + 健康检查(无模型调用) ---- */
+/* ---- 4. 启动服务 + 健康检查(无模型调用) ----
+ * 四元严格核对: 服务身份 + 数据目录指纹(data) + 实例指纹(iid) + 版本。
+ * 缺指纹旧服务不放行; 同目录旧版本进程只在命令行核实归属后才终止重启。 */
 log('⑧ 启动本地服务并健康检查…');
 const FP=require('crypto').createHash('sha1').update(DATA).digest('hex').slice(0,12);
-const health=()=>new Promise(res=>{
-  let port=4310;
-  try{port=JSON.parse(fs.readFileSync(path.join(DATA,'runtime.json'),'utf8')).port||4310;}catch(_){}
+const readRt=()=>{try{return JSON.parse(fs.readFileSync(path.join(DATA,'runtime.json'),'utf8'));}catch(_){return null;}};
+const ownsServer=(pid)=>{
+  if(!pid)return false;
+  const ps=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+  const r=spawnSync(ps,['-NoProfile','-NonInteractive','-Command',
+    `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+    {encoding:'utf8',windowsHide:true,timeout:8000});
+  return /runtime[\\\/]server\.js/.test((r.stdout||'')+(r.stderr||''));
+};
+const classify=(port)=>new Promise(res=>{
   const req=http.get({host:'127.0.0.1',port,path:'/api/health',timeout:1500},r=>{
     let b='';r.on('data',d=>b+=d);r.on('end',()=>{
-      let ok=false;
-      try{const j=JSON.parse(b);ok=(j.ok===true&&j.service==='chengshi-workshop'&&(!j.data||j.data===FP));}catch(_){}
-      res({ok,port,body:b});                                  /* 只认本应用身份+本数据目录,任意200不算 */
+      let j=null;try{j=JSON.parse(b);}catch(_){}
+      if(!j||j.ok!==true||j.service!=='chengshi-workshop')return res(null);
+      if(!j.data||!j.iid)return res('old');
+      const rt=readRt();
+      if(j.data!==FP)return res('other');
+      if(rt&&j.iid!==rt.iid)return res('stale');
+      if(EXPECTED&&j.version!==EXPECTED)return res('stale');
+      res('full');
     });
   });
-  req.on('timeout',()=>{req.destroy();res({ok:false,port});});
-  req.on('error',()=>res({ok:false,port}));
+  req.on('timeout',()=>{req.destroy();res(null);});
+  req.on('error',()=>res(null));
 });
-let h=await health();
-if(!h.ok){
-  /* 实测: cmd /c start /min 拉起的进程随安装器退出被终止; 直接 detached spawn 才能存活(与 launcher.js 同法) */
+async function findService(){
+  const rt=readRt();
+  const first=rt&&rt.port?rt.port:4310;
+  let c=await classify(first);
+  if(c==='full')return{port:first};
+  let seen=c;                                               /* 可疑(old/stale)优先于 other, 不被覆盖 */
+  for(let p=4310;p<=4330;p++){
+    if(p===first)continue;
+    c=await classify(p);
+    if(c==='full')return{port:p};
+    if(c&&(seen===null||seen==='other'))seen=c;
+  }
+  return{port:null,seen};
+}
+let found=await findService();
+if(!found.port){
+  const rt=readRt();
+  const killable=(found.seen==='stale'||found.seen==='old')&&rt&&ownsServer(rt.pid);
+  if(killable){
+    log('  检测到本数据目录的旧版服务(已核实进程归属),终止并拉起当前版本…');
+    try{process.kill(rt.pid);}catch(_){}
+    const child=spawn(resolveNode(),[path.join(ROOT,'runtime','server.js')],{cwd:ROOT,env:process.env,windowsHide:true,stdio:'ignore',detached:true});
+    child.unref();
+    for(let i=0;i<25&&!found.port;i++){await new Promise(r=>setTimeout(r,800));found=await findService();}
+  }else if(found.seen==='stale'||found.seen==='old'){
+    /* 归属核实不过: 它可能正占着本数据目录, 盲启第二个服务会双写数据 → 如实中止 */
+    fail('检测到'+({old:'旧版服务(缺少指纹)',stale:'本数据目录的旧进程'}[found.seen])
+      +',但无法核实进程归属,未终止任何进程、也未启动新服务(避免两个服务同写数据目录)。'
+      +'请手动结束残留 node 进程后重试;数据不会丢失。');
+  }
+}
+if(!found.port){
   const child=spawn(resolveNode(),[path.join(ROOT,'runtime','server.js')],{cwd:ROOT,env:process.env,windowsHide:true,stdio:'ignore',detached:true});
   child.unref();
-  for(let i=0;i<20&&!h.ok;i++){await new Promise(r=>setTimeout(r,800));h=await health();}
+  for(let i=0;i<20&&!found.port;i++){await new Promise(r=>setTimeout(r,800));found=await findService();}
 }
-if(!h.ok)fail('服务未能启动。请手动运行: node runtime/server.js 查看报错');
-log('  服务健康 ✔ http://127.0.0.1:'+h.port+'/');
+if(!found.port){
+  const what={old:'旧版服务(缺少指纹,无法确认归属)',stale:'本数据目录的旧进程(归属核实未通过)',other:'其他数据目录的实例(不影响,但本实例未能启动)'}[found.seen]||'未知原因';
+  fail('服务未能确认。'+what+'。未强行终止任何进程;请手动结束残留 node 进程后重试,数据不会丢失。');
+}
+const finalRt=readRt();
+log('  服务健康 ✔ http://127.0.0.1:'+found.port+'/ ｜ v'+EXPECTED+' ｜ 实例 '+String(finalRt&&finalRt.iid||'?')+' ｜ 数据目录指纹 '+FP);
+const h={port:found.port};
 
 log('═══ 安装完成 ═══');
 log('日常用法: 双击桌面「成事工坊」→ 开始或继续一件事。');
