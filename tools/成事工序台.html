@@ -204,7 +204,23 @@
     </div>
     </div><!-- /stdForm -->
 
-    <!-- 第零/二/四关专属: 目标拆解=步骤清单 -->
+    <!-- 第一关专属: 方向选择 = 候选+代价+圈定 -->
+    <div id="benchS1" class="hidden" style="margin-top:12px">
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 把候选方向列出来（看得见真人在做的）→ ② 每个写一句要付的代价 → ③ 圈定一个，其余自动变备选</div>
+      <label>🧭 候选方向（列 2~3 个，不许空中楼阁）</label>
+      <div style="display:flex;gap:6px;margin-top:2px">
+        <input type="text" id="s1A" placeholder="方向：做什么、卖给谁" style="flex:2">
+        <input type="text" id="s1C" placeholder="一句代价：要舍什么、怕什么" style="flex:2">
+        <button class="mini" onclick="addDir()">＋方向</button>
+      </div>
+      <div id="dirStuck" style="display:none;margin-top:10px;background:#fbf6ec;border:1px dashed var(--wood-lt);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--muted)">
+        <b style="color:var(--wood)">比不出来时问这三句：</b>① 哪个的最坏结果<span style="color:var(--wood)">亏得起</span>？② 哪个<span style="color:var(--wood)">7天内</span>能开始验证？③ 哪个不说出来会<span style="color:var(--wood)">睡不着</span>？<br>
+        <button class="mini" style="margin-top:6px" onclick="fillDir()">先填一个探路方向</button>
+      </div>
+      <button class="mini" style="margin-top:8px" onclick="document.getElementById('dirStuck').style.display=''">😖 比不出来？</button>
+    </div>
+
+    <!-- 第二关专属: 目标拆解=步骤清单 -->
     <div id="benchS2" class="hidden" style="margin-top:12px">
       <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 写目标 → ② 拆步骤（每步问：明天能开干吗）→ ③ 全绿了去「本周」开干</div>
       <label>🎯 目标一句话（做到什么程度算"做成了"）</label>
@@ -222,6 +238,22 @@
       <button class="mini" style="margin-top:8px" onclick="document.getElementById('stuckBox').style.display=''">😖 拆不动了？</button>
     </div>
 
+    <!-- 第三关专属: 动手迭代 = 一轮一轮, 先写假设再对结果 -->
+    <div id="benchS3" class="hidden" style="margin-top:12px">
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 这轮做什么 → ② 先写预计发生什么（假设）→ ③ 做完记结果，结果喂给下一轮</div>
+      <label>🔁 这一轮（动作来自你拆好的步骤）</label>
+      <div style="display:flex;gap:6px;margin-top:2px">
+        <input type="text" id="s3A" placeholder="这一轮具体做什么" style="flex:2">
+        <input type="text" id="s3E" placeholder="预计发生什么（可检验的假设）" style="flex:2">
+        <button class="mini" onclick="addRound()">＋轮</button>
+      </div>
+      <div id="roundStuck" style="display:none;margin-top:10px;background:#fbf6ec;border:1px dashed var(--wood-lt);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--muted)">
+        <b style="color:var(--wood)">一轮都开不了时：</b>把这轮缩到<span style="color:var(--wood)">最小</span>——只问一个人、只发一条、只摆一天。动起来才算数，完美不算数。<br>
+        <button class="mini" style="margin-top:6px" onclick="fillRound()">填一个最小轮</button>
+      </div>
+      <button class="mini" style="margin-top:8px" onclick="document.getElementById('roundStuck').style.display=''">😖 这轮开不了？</button>
+    </div>
+
     <!-- 心态续航: 情绪一句话 + 最小动作菜单 + 派一个 -->
     <div id="benchS4" class="hidden" style="margin-top:12px">
       <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 把情绪写成一句话 → ② 从下面选一个最小动作（不用想！）→ ③ 做完回来打勾</div>
@@ -235,6 +267,31 @@
         <button class="ghost" onclick="pickRandomMood()">🎲 派一个</button>
         <button class="ghost" onclick="closeBench()">收起本关</button>
       </div>
+    </div>
+    <!-- 第五关专属: 做成复盘 = 一句话+关键三步+幸亏+最有效一招 -->
+    <div id="benchS5" class="hidden" style="margin-top:12px">
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 写做成的一句话 → ② 回顾关键三步，每步配一句"当时幸亏" → ③ 记下最有效一招，收工</div>
+      <label>🎯 做成的一句话（时间+结果，和当初的目标对一下）</label>
+      <input type="text" id="s5_done" placeholder="例：三个月内夜市摆摊月净赚3000，第79天做到了" oninput="saveS5('done',this.value)">
+      <label>🪜 关键三步（转折点：各写一步 + 一句"当时幸亏做了什么"）</label>
+      <div style="display:flex;gap:6px;margin-top:2px">
+        <input type="text" id="s5_k1" placeholder="第①步：发生了什么" style="flex:2" oninput="saveS5('k1',this.value)">
+        <input type="text" id="s5_l1" placeholder="幸亏当时…" style="flex:2" oninput="saveS5('l1',this.value)">
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <input type="text" id="s5_k2" placeholder="第②步：发生了什么" style="flex:2" oninput="saveS5('k2',this.value)">
+        <input type="text" id="s5_l2" placeholder="幸亏当时…" style="flex:2" oninput="saveS5('l2',this.value)">
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <input type="text" id="s5_k3" placeholder="第③步：发生了什么" style="flex:2" oninput="saveS5('k3',this.value)">
+        <input type="text" id="s5_l3" placeholder="幸亏当时…" style="flex:2" oninput="saveS5('l3',this.value)">
+      </div>
+      <label>⭐ 最有效的一招（下次遇到别的事直接复用的那个）</label>
+      <input type="text" id="s5_best" placeholder="例：先摆一天再说——动作永远比完美计划值钱" oninput="saveS5('best',this.value)">
+      <div id="s5Stuck" style="display:none;margin-top:10px;background:#fbf6ec;border:1px dashed var(--wood-lt);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--muted)">
+        <b style="color:var(--wood)">想不起关键步？</b>→ 「本周」页有你全部任务卡，按时间从头翻一遍，来路都在里面；做完一张回收一张，复盘就是读自己的档案。
+      </div>
+      <button class="mini" style="margin-top:8px" onclick="document.getElementById('s5Stuck').style.display=''">😖 想不起来？</button>
     </div>
     <div id="taskList"></div>
   </div>
@@ -302,7 +359,7 @@
   </div>
   </div><!-- /viewData -->
 
-  <footer>成事工坊 · 成事工序台 v0.5 ｜ 每个事项有自己的流水线、任务卡和结局 ｜ 纯前端单机，数据只在你本机浏览器 ｜ 方法论全文见仓库 chapters/ 目录</footer>
+  <footer>成事工坊 · 成事工序台 v0.6 ｜ 每个事项有自己的流水线、任务卡和结局 ｜ 纯前端单机，数据只在你本机浏览器 ｜ 方法论全文见仓库 chapters/ 目录</footer>
 </div>
 
 <!-- 开场引导 -->
@@ -311,7 +368,7 @@
     <h2>第一次来？30 秒看懂</h2>
     <div class="sub" style="margin-bottom:2px">这里不是让你"学"的，是让你"过"的</div>
     <div class="step"><div class="n">1</div><div><div class="tt">点一关，看图纸</div><div class="dd">六个工位是从念头到做成的全部工序，找到你现在卡住的那关</div></div></div>
-    <div class="step"><div class="n">2</div><div><div class="tt">填三行，生成任务卡</div><div class="dd">要做的动作 / 做到什么算完 / 什么情况该停——写死再动手</div></div></div>
+    <div class="step"><div class="n">2</div><div><div class="tt">按导引填，生成任务卡</div><div class="dd">每关有自己的填空：动作/算完/该停，或那关专属的结构化卡片——写死再动手</div></div></div>
     <div class="step"><div class="n">3</div><div><div class="tt">排进今天，做完打勾</div><div class="dd">任务卡生成后会自动跳到「本周」页；顶部四个标签——工序 / 本周 / 结局 / 数据，各管一件事</div></div></div>
     <button class="primary" style="width:100%;margin-top:14px;padding:12px" onclick="closeGuide()">好，进工坊干活 →</button>
   </div>
@@ -455,8 +512,14 @@ function deleteProject(){
 }
 function stationMet(s){
   const list=state.tasks.filter(t=>t.st===s.id);
+  if(s.id==='s1'){const ps=list.filter(t=>t.pick);
+    return list.length>=2&&list.every(t=>t.accept&&t.accept.trim())&&ps.length===1&&!!(ps[0].done&&ps[0].evidence);}
   if(s.id==='s2')return !!(state.goal&&state.goal[s.id]&&state.goal[s.id].trim())&&list.length>0&&list.every(t=>t.ready)&&list.some(t=>t.done&&t.evidence);
+  if(s.id==='s3'){const dn=list.filter(t=>t.done);
+    return dn.length>=2&&dn.every(t=>t.evidence&&t.evidence.trim())&&dn.some(t=>t.revise&&t.revise.trim());}
   if(s.id==='s4')return list.some(t=>t.done&&t.mood&&t.mood.trim());
+  if(s.id==='s5'){const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
+    return !!state.outcome&&['done','k1','l1','k2','l2','k3','l3','best'].every(k=>g[k]&&g[k].trim());}
   return list.some(t=>t.done&&t.evidence);
 }
 function renderPassCond(){
@@ -471,8 +534,27 @@ function renderPassCond(){
     const g=!!(state.goal&&state.goal.s2&&state.goal.s2.trim());
     const n=list.length>0,rd=list.length>0&&list.every(t=>t.ready),dn=list.some(t=>t.done&&t.evidence);
     rows=chk(g)+'目标一句话写死　'+chk(n&&rd)+'每步都标了"明天能开干"（共'+list.length+'步）　'+chk(dn)+'至少一步完成+证据';
+  }else if(cur==='s1'){
+    const ps=list.filter(t=>t.pick);
+    rows=chk(list.length>=2)+'列了≥2个方向（共'+list.length+'个）　'
+      +chk(list.length>0&&list.every(t=>t.accept&&t.accept.trim()))+'每个都写了代价　'
+      +chk(ps.length===1)+'圈定了一个　'
+      +chk(!!(ps.length&&ps[0].done&&ps[0].evidence))+'圈定的做完+证据';
+  }else if(cur==='s3'){
+    const dn=list.filter(t=>t.done);
+    rows=chk(list.length>=2)+'排了≥2轮（共'+list.length+'轮）　'
+      +chk(dn.length>=2&&dn.every(t=>t.evidence&&t.evidence.trim()))+'每轮做完+留结果　'
+      +chk(dn.some(t=>t.revise&&t.revise.trim()))+'根据结果改过一次';
   }else if(cur==='s4'){
     rows=chk(list.some(t=>t.mood&&t.mood.trim()))+'情绪写了一句话　'+chk(list.some(t=>t.done))+'完成一个最小动作';
+  }else if(cur==='s5'){
+    const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
+    const f=k=>g[k]&&g[k].trim();
+    rows=chk(!!state.outcome)+'结局如实选了　'
+      +chk(f('done'))+'做成的一句话　'
+      +chk(f('k1')&&f('k2')&&f('k3'))+'关键三步　'
+      +chk(f('l1')&&f('l2')&&f('l3'))+'每步一句"幸亏"　'
+      +chk(f('best'))+'最有效一招';
   }else{
     rows=chk(list.some(t=>t.done))+'至少一张卡完成　'+chk(list.some(t=>t.done&&t.evidence))+'写下证据';
   }
@@ -550,6 +632,48 @@ function toggleReady(id){
   t.ready=!t.ready;save();
   if(!t.ready)toast('这步明天开不了干→继续拆它，或改成"先去搞到信息"');
 }
+/* ===== 第一关·方向选择 ===== */
+function addDir(){
+  const a=document.getElementById('s1A').value.trim(),c=document.getElementById('s1C').value.trim();
+  if(!a){toast('先写这个方向做什么');return;}
+  if(!c){toast('每个方向都要写一句代价——不写代价的选择是赌博');return;}
+  state.tasks.push({id:Date.now(),st:'s1',a,accept:c,stop:'',slot:'none',done:false,pick:false});
+  document.getElementById('s1A').value='';document.getElementById('s1C').value='';
+  save();toast('＋一个方向　写完代价才能比');
+}
+function fillDir(){
+  document.getElementById('s1A').value='先去看3个真人在做这个方向的人';
+  document.getElementById('s1C').value='花一个下午，换一个真实参照物';
+  document.getElementById('s1A').focus();
+}
+function pickDir(id){
+  const t=state.tasks.find(x=>x.id===id);if(!t)return;
+  state.tasks.filter(x=>x.st==='s1').forEach(x=>{x.pick=(x.id===id);});
+  save();
+  toast('🏆 圈定了「'+t.a+'」——其余自动变备选，不算浪费');
+}
+/* ===== 第三关·动手迭代 ===== */
+function addRound(){
+  const a=document.getElementById('s3A').value.trim(),e=document.getElementById('s3E').value.trim();
+  if(!a){toast('先写这一轮做什么');return;}
+  const n=state.tasks.filter(t=>t.st==='s3').length+1;
+  state.tasks.push({id:Date.now(),st:'s3',a,expect:e,accept:e,round:n,stop:'',slot:'none',done:false});
+  document.getElementById('s3A').value='';document.getElementById('s3E').value='';
+  save();toast('＋第'+n+'轮　做完记得：结果不管好坏都回收');
+}
+function fillRound(){
+  document.getElementById('s3A').value='只去问一个做过这事的人一个具体问题';
+  document.getElementById('s3E').value='得到一个真实回答（名字/数字/原话）';
+  document.getElementById('s3A').focus();
+}
+/* ===== 第五关·做成复盘 ===== */
+function saveS5(k,v){
+  if(!state.goal)state.goal={};
+  if(typeof state.goal.s5!=='object'||!state.goal.s5)state.goal.s5={};
+  state.goal.s5[k]=v.trim();
+  renderPassCond();renderMap();
+  if(!persist())toast('⚠️ 存储不可用，请导出备份');
+}
 const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',1700);}
 function allStations(){return STATIONS.concat(state.custom);}
@@ -603,12 +727,18 @@ function openBench(id,m){
   document.getElementById('forkBox').style.display=s.fork?'':'none';
   renderBp();renderTasks();setMode((s.fork?m:null)||'know',s);
   renderMap();
-  const isS2=id==='s2',isS4=id==='s4';
-  document.getElementById('stdForm').style.display=(isS2||isS4)?'none':'';
+  const isS1=id==='s1',isS2=id==='s2',isS3=id==='s3',isS4=id==='s4',isS5=id==='s5';
+  const isStruct=isS1||isS2||isS3||isS4||isS5;
+  document.getElementById('stdForm').style.display=isStruct?'none':'';
+  document.getElementById('benchS1').classList.toggle('hidden',!isS1);
   document.getElementById('benchS2').classList.toggle('hidden',!isS2);
+  document.getElementById('benchS3').classList.toggle('hidden',!isS3);
   document.getElementById('benchS4').classList.toggle('hidden',!isS4);
+  document.getElementById('benchS5').classList.toggle('hidden',!isS5);
   if(isS2)document.getElementById('s2Goal').value=(state.goal&&state.goal.s2)||'';
   if(isS4){renderMoodMenu();}
+  if(isS5){const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
+    ['done','k1','l1','k2','l2','k3','l3','best'].forEach(k=>{const el=document.getElementById('s5_'+k);if(el)el.value=g[k]||'';});}
   renderPassCond();
   document.getElementById('bench').scrollIntoView({behavior:'smooth',block:'start'});
 }
@@ -705,12 +835,14 @@ function renderTasks(){
   const list=state.tasks.filter(t=>t.st===cur);
   list.forEach(t=>{
     const d=document.createElement('div');d.className='task'+(t.done?' done':'');
-    d.innerHTML=`<div class="a"><input type="checkbox" class="chk" ${t.done?'checked':''} onchange="toggleDone(${t.id})"> ${t.recon?'<span class="src" style="background:#eef4ec;color:var(--ok)">🧭 探路</span> ':''}${esc(t.a)}</div>
+    d.innerHTML=`<div class="a"><input type="checkbox" class="chk" ${t.done?'checked':''} onchange="toggleDone(${t.id})"> ${cur==='s3'&&t.round?'🔁 第'+t.round+'轮 · ':''}${t.recon?'<span class="src" style="background:#eef4ec;color:var(--ok)">🧭 探路</span> ':''}${esc(t.a)}</div>
       ${t.accept?`<div class="meta">✔ 算完：${esc(t.accept)}</div>`:''}
       ${t.stop?`<div class="meta">⛔ 该停：${esc(t.stop)}</div>`:''}
+      ${cur==='s1'?`<div class="meta">${t.pick?'<span class="src" style="background:#f6ecd9;color:var(--wood)">🏆 已圈定</span> <span style="font-size:11.5px">去做它，做完拿证据</span>':`<button class="mini" onclick="pickDir(${t.id})">✅ 就这个</button>`}</div>`:''}
+      ${cur==='s3'&&t.expect?`<div class="meta">🔮 事先假设：${esc(t.expect)}</div>`:''}
       ${cur==='s2'?`<div class="meta"><label style="display:flex;gap:6px;align-items:center;margin:0;cursor:pointer"><input type="checkbox" class="chk" style="width:15px;height:15px" ${t.ready?'checked':''} onchange="toggleReady(${t.id})"> 明天能直接开干？（勾不上＝还得继续拆）</label></div>`:''}
       ${cur==='s4'&&t.mood?`<div class="meta">🧠 当时情绪：${esc(t.mood)}</div>`:''}
-      ${t.done&&!t.evidence&&cur!=='s4'?`<div class="meta" style="color:var(--warn)">⚠️ 写下证据，这关才算过</div>`:''}
+      ${t.done&&!t.evidence&&cur!=='s4'&&!(cur==='s1'&&!t.pick)?`<div class="meta" style="color:var(--warn)">⚠️ 写下证据，这关才算过</div>`:''}
       <div class="ops"><button class="mini" onclick="delTask(${t.id})">删</button></div>
       ${t.done?`<div style="margin-top:9px;background:#f2f8f2;border:1px dashed #c8dcc8;border-radius:8px;padding:9px 11px">
         <div style="font-size:12px;color:var(--ok);font-weight:600;margin-bottom:4px">📥 结果回收 · 干完不算完，证据才算</div>
@@ -719,12 +851,12 @@ function renderTasks(){
       </div>`:''}`;
     el.appendChild(d);
   });
-  if(!list.length)el.innerHTML='<div class="sub" style="margin-top:12px">本关还没有任务卡，按图纸写一张</div>';
+  if(!list.length)el.innerHTML='<div class="sub" style="margin-top:12px">'+(cur==='s5'?'本关不留任务卡——复盘写在上面，结局到「结局」页如实选':'本关还没有任务卡，按图纸写一张')+'</div>';
 }
 function saveEv(id,k,v){
   const t=state.tasks.find(x=>x.id===id);if(!t)return;
   t[k]=v.trim();
-  renderMap();
+  renderMap();renderPassCond();
   const st=document.getElementById('evStat-'+id);
   if(st){st.style.color=t.evidence?'var(--ok)':'var(--warn)';
     st.textContent=t.evidence?'✅ 这关过了——回「工序」流水线，进下一关':'⚠️ 证据还空着：这关不算过，不盖章';}
@@ -829,6 +961,7 @@ function setOutcome(v){
   document.getElementById('outcomeTxt').textContent=v?OUTCOME_TXT[v]:'';
   const oc={done:'目标达成',go:'验证成立·继续',stop:'理性终止',explore:'探索中'};
   document.getElementById('certOutcome').textContent='当前结局：'+(oc[v]||'未填写');
+  renderPassCond();
   persist();
 }
 function restoreOutcome(){
