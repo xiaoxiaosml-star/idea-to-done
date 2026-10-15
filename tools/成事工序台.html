@@ -146,6 +146,7 @@
     <button id="navFlow" class="on" onclick="goView('flow')">🧭 工序</button>
     <button id="navWeek" onclick="goView('week')">📅 本周<span class="bdg" id="navWeekCnt"></span></button>
     <button id="navOutcome" onclick="goView('outcome')">🎯 结局<span class="bdg" id="navOutcomeBdg"></span></button>
+    <button id="navWisdom" onclick="goView('wisdom');renderWisdom()">📖 心法</button>
     <button id="navData" onclick="goView('data')">💾 数据</button>
   </div>
 
@@ -335,6 +336,15 @@
   </div>
   </div><!-- /viewOutcome -->
 
+  <!-- ===== 页五 · 心法 ===== -->
+  <div id="viewWisdom" class="hidden">
+  <div class="card">
+    <h2 style="border-left-color:var(--gold)">📖 我的成事心法</h2>
+    <div class="sub" style="margin:0 0 12px">不是算法猜的——是你一条一条留下的记录，加总出来的你 ｜ 记录越多，画像越真</div>
+    <div id="wisdomBody"></div>
+  </div>
+  </div><!-- /viewWisdom -->
+
   <!-- ===== 页四 · 数据 ===== -->
   <div id="viewData" class="hidden">
   <div class="card">
@@ -500,18 +510,19 @@ function deleteProject(){
   persist();refreshProjBar();renderAll();goView('flow');
   toast('已删除，现位于「'+projects.items[projects.current].name+'」');
 }
-function stationMet(s){
-  const list=state.tasks.filter(t=>t.st===s.id);
+function stationMet(s,st){
+  st=st||state;
+  const list=st.tasks.filter(t=>t.st===s.id);
   if(s.id==='s1'){const ps=list.filter(t=>t.pick);
     return list.length>=2&&list.every(t=>t.accept&&t.accept.trim())&&ps.length===1&&!!(ps[0].done&&ps[0].evidence);}
-  if(s.id==='s2')return !!(state.goal&&state.goal[s.id]&&state.goal[s.id].trim())&&list.length>0&&list.every(t=>t.ready)&&list.some(t=>t.done&&t.evidence);
+  if(s.id==='s2')return !!(st.goal&&st.goal[s.id]&&st.goal[s.id].trim())&&list.length>0&&list.every(t=>t.ready)&&list.some(t=>t.done&&t.evidence);
   if(s.id==='s3'){const dn=list.filter(t=>t.done);
     return dn.length>=2&&dn.every(t=>t.evidence&&t.evidence.trim())&&dn.some(t=>t.revise&&t.revise.trim());}
   if(s.id==='s4')return list.some(t=>t.done&&t.mood&&t.mood.trim());
-  if(s.id==='s5'){const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
+  if(s.id==='s5'){const g=(st.goal&&typeof st.goal.s5==='object'&&st.goal.s5)||{};
     const keys=g.keys||{};
-    const ids=Object.keys(keys).filter(id=>state.tasks.some(t=>t.id===Number(id)));
-    return !!state.outcome&&!!(g.done&&g.done.trim())&&!!(g.best&&g.best.trim())&&ids.length>=3&&ids.every(id=>keys[id]&&keys[id].trim());}
+    const ids=Object.keys(keys).filter(id=>st.tasks.some(t=>t.id===Number(id)));
+    return !!st.outcome&&!!(g.done&&g.done.trim())&&!!(g.best&&g.best.trim())&&ids.length>=3&&ids.every(id=>keys[id]&&keys[id].trim());}
   return list.some(t=>t.done&&t.evidence);
 }
 function renderPassCond(){
@@ -971,7 +982,7 @@ function toggleDone(id){const t=state.tasks.find(x=>x.id===id);t.done=!t.done;if
 function delTask(id){state.tasks=state.tasks.filter(x=>x.id!==id);save();}
 
 /* ===== 页面切换 ===== */
-const VIEWS={flow:'viewFlow',week:'viewWeek',outcome:'viewOutcome',data:'viewData'};
+const VIEWS={flow:'viewFlow',week:'viewWeek',outcome:'viewOutcome',wisdom:'viewWisdom',data:'viewData'};
 function goView(v){
   for(const k in VIEWS){
     document.getElementById(VIEWS[k]).classList.toggle('hidden',k!==v);
@@ -1052,6 +1063,69 @@ function clearAll(){
   state={tasks:[],custom:[],bp:{},outcome:'',goal:{}};cur=null;
   document.getElementById('bench').classList.add('hidden');
   if(save())toast('已清空');
+}
+
+/* ===== 心法页: 跨事项聚合, 全部来自真实留痕 ===== */
+function renderWisdom(){
+  const el=document.getElementById('wisdomBody');if(!el)return;
+  const all=projects.order.map(pid=>({name:projects.items[pid].name,st:projects.items[pid].state}));
+  const secs=[];
+  const sec=(t,sub,rows)=>{if(rows)secs.push('<div style="margin-top:16px"><div style="font-size:14px;font-weight:700;color:var(--wood)">'+t+'</div>'
+    +(sub?'<div style="font-size:11.5px;color:var(--muted);margin:2px 0 6px">'+sub+'</div>':'')
+    +'<div style="border-top:1px dashed var(--line)">'+rows+'</div></div>');};
+  const row=(l,r)=>'<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px;align-items:baseline"><span style="min-width:0">'+l+'</span><span style="color:var(--muted);font-size:12px;text-align:right;flex-shrink:0">'+r+'</span></div>';
+  const chip=n=>'<span class="src">'+esc(n)+'</span>';
+
+  /* 战绩 */
+  const oc={done:0,go:0,stop:0,explore:0,none:0};
+  all.forEach(p=>{const k=p.st.outcome||'none';oc[k]=(oc[k]||0)+1;});
+  const certN=all.filter(p=>STATIONS.every(s=>stationMet(s,p.st))).length;
+  sec('🏆 战绩一览','四种结局都是正经结局，看分布就知道你是什么类型的成事者',
+    row('一共开过的事项',''+all.length)
+    +row('🎯 做成了',''+oc.done)+row('🚀 验证成立·继续',''+oc.go)
+    +row('🛑 理性终止（排除错误选项）',''+oc.stop)+row('🌫 还在探索',''+oc.explore)
+    +row('六关全过拿工序卡',''+certN+' 次'));
+
+  /* 迭代画像 */
+  const rounds=all.flatMap(p=>p.st.tasks.filter(t=>t.st==='s3').map(t=>({...t,from:p.name})));
+  const dn=rounds.filter(t=>t.done);
+  const revised=dn.filter(t=>t.revise&&t.revise.trim()).length;
+  if(rounds.length)sec('🔁 迭代画像','改率＝做完的轮里，有多少轮根据结果调整过——高改率=真迭代，零改率=原地转圈',
+    row('平均每件事的轮数',(rounds.length/all.length).toFixed(1)+' 轮')
+    +row('做完且留结果的轮',''+dn.length)
+    +row('根据结果改过的比例',dn.length?Math.round(revised/dn.length*100)+'%（'+revised+'/'+dn.length+'）':'—'));
+
+  /* 有效动作榜 */
+  const acts={};
+  all.forEach(p=>p.st.tasks.forEach(t=>{
+    if(t.done&&t.evidence&&STATIONS.some(x=>x.id===t.st)){
+      if(!acts[t.a])acts[t.a]={n:0,ev:'',from:''};
+      acts[t.a].n++;acts[t.a].ev=t.evidence;acts[t.a].from=p.name;
+    }}));
+  const actRows=Object.keys(acts).sort((a,b)=>acts[b].n-acts[a].n).slice(0,8)
+    .map(a=>row('<b>'+esc(a)+'</b>'+(acts[a].n>1?' <span class="src">×'+acts[a].n+'</span>':'')
+      +'<div style="font-size:11.5px;color:var(--muted)">最近结果：'+esc(acts[a].ev)+'</div>',chip(acts[a].from))).join('');
+  sec('🎯 有效动作榜','出现两次以上的，就是你的祖传招——下次不知道干嘛，先从这里挑',actRows);
+
+  /* 关键转折库 */
+  let turns='';
+  all.forEach(p=>{const g=p.st.goal&&p.st.goal.s5,keys=(g&&g.keys)||{};
+    Object.keys(keys).forEach(id=>{const t=p.st.tasks.find(x=>x.id===Number(id));
+      if(t&&keys[id]&&keys[id].trim())turns+=row('<b>'+esc(t.a)+'</b>',esc(keys[id])+'　'+chip(p.name));});});
+  sec('⭐ 关键转折库','你认过账的转折点：动作 ↔ 幸亏——读几遍，你就知道自己靠什么成事',turns);
+
+  /* 情绪恢复记录 */
+  const rescues=all.flatMap(p=>p.st.tasks.filter(t=>t.st==='s4'&&t.mood).map(t=>({...t,from:p.name})));
+  sec('🫀 情绪恢复记录','你崩的时候都是靠什么缓过来的——下次崩，照方抓药',
+    rescues.map(t=>row('<b>'+esc(t.mood)+'</b>'+(t.done?' <span style="color:var(--ok)">✅ 做完了</span>':'')
+      +'<div style="font-size:11.5px;color:var(--muted)">用的招：'+esc(t.a)+'</div>',chip(t.from))).join(''));
+
+  /* 最有效一招库 */
+  const bests=all.filter(p=>p.st.goal&&p.st.goal.s5&&p.st.goal.s5.best&&p.st.goal.s5.best.trim())
+    .map(p=>row('<b>'+esc(p.st.goal.s5.best)+'</b>',chip(p.name)));
+  sec('💎 最有效一招库','每件事收官时你亲自提炼的——这些加起来，就是你现在的心法',bests.join(''));
+
+  el.innerHTML=secs.length?secs.join(''):'<div class="sub">记录还太少，这里暂时长不出画像——先去「工序」页把第一关过了，心法是一点一点攒出来的</div>';
 }
 
 /* ===== 结局制 ===== */
