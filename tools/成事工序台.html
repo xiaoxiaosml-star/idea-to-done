@@ -178,6 +178,7 @@
     <h2 id="benchTitle"></h2>
     <div id="modeTag" style="display:none;margin-top:6px;font-size:13px;font-weight:600;color:var(--wood);background:#f6ecd9;border:1px solid var(--wood-lt);border-radius:8px;padding:5px 12px"></div>
     <div id="passCond" style="margin-top:8px;font-size:12.5px;background:#f4f9f4;border:1px solid #cfe3cf;border-radius:8px;padding:8px 12px"></div>
+    <div id="oldTricks" style="display:none;margin-top:10px;background:#f7f2e7;border:1px dashed var(--wood-lt);border-radius:10px;padding:10px 14px"></div>
     <div class="blueprint">
       <b class="t">📐 本关图纸 · 看完一条勾一条</b>
       <div id="bpList"></div>
@@ -711,6 +712,66 @@ function saveKey(id,v){
   renderPassCond();
   if(!persist())toast('⚠️ 存储不可用，请导出备份');
 }
+/* ===== 旧招推送: 别的事项里真用过、真有效的 ===== */
+function renderOldTricks(){
+  const el=document.getElementById('oldTricks');if(!el)return;
+  if(!cur){el.style.display='none';return;}
+  const items=[];
+  projects.order.filter(pid=>pid!==projects.current).forEach(pid=>{
+    const pr=projects.items[pid],st=pr.state;
+    if(cur==='s4'){
+      st.tasks.filter(t=>t.st==='s4'&&t.done&&t.mood).forEach(t=>items.push({kind:'rescue',a:t.a,mood:t.mood,from:pr.name,rank:1}));
+    }else if(cur==='s5'){
+      const g=st.goal&&st.goal.s5;
+      if(g&&g.best&&g.best.trim()&&st.outcome)items.push({kind:'best',a:g.best,from:pr.name,rank:1});
+    }else{
+      const keys=(st.goal&&st.goal.s5&&st.goal.s5.keys)||{};
+      st.tasks.filter(t=>t.st===cur&&t.done&&t.evidence).forEach(t=>{
+        const star=keys[t.id]!==undefined&&!!keys[t.id].trim();
+        items.push({kind:'task',a:t.a,acc:t.accept||'',stop:t.stop||'',ev:t.evidence,expect:t.expect||'',from:pr.name,rank:star?0:(t.revise&&t.revise.trim()?1:2)});
+      });
+    }
+  });
+  if(!items.length){el.style.display='none';return;}
+  items.sort((x,y)=>x.rank-y.rank);
+  const seen=new Set(),top=[];
+  for(const it of items){if(seen.has(it.a))continue;seen.add(it.a);top.push(it);if(top.length>=3)break;}
+  let html='<div style="font-size:13px;color:var(--wood);font-weight:600;margin-bottom:2px">📜 你的旧招 · 别的事项里真用过、真有效的（不是建议，是你的存档）</div>';
+  top.forEach((it,i)=>{
+    const note=it.kind==='rescue'?('当时情绪：'+it.mood):('结果：'+it.ev);
+    html+='<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--line)">'
+      +'<div style="flex:1;font-size:12.5px;min-width:0"><b>'+esc(it.a)+'</b>'
+      +'<div style="font-size:11.5px;color:var(--muted);margin-top:2px">'+esc(note)+'　<span class="src">'+esc(it.from)+'</span></div></div>'
+      +'<button class="mini" style="flex-shrink:0" onclick="useTrick('+i+')">用这招</button></div>';
+  });
+  el._items=top;
+  el.innerHTML=html;
+  el.style.display='';
+}
+function useTrick(i){
+  const el=document.getElementById('oldTricks');const it=el._items[i];if(!it)return;
+  if(cur==='s4'){
+    document.getElementById('moodNote').value=it.mood;
+    if(MOOD_ACTIONS.includes(it.a)){selMood=it.a;renderMoodMenu();}
+  }else if(cur==='s5'){
+    document.getElementById('s5_best').value=it.a;
+    saveS5('best',it.a);
+  }else if(cur==='s0'){
+    document.getElementById('fAction').value=it.a;
+    document.getElementById('fAccept').value=it.acc;
+    document.getElementById('fStop').value=it.stop;
+  }else if(cur==='s1'){
+    document.getElementById('s1A').value=it.a;
+    document.getElementById('s1C').value=it.acc;
+  }else if(cur==='s2'){
+    document.getElementById('s2A').value=it.a;
+    document.getElementById('s2C').value=it.acc;
+  }else if(cur==='s3'){
+    document.getElementById('s3A').value=it.a;
+    document.getElementById('s3E').value=it.expect||it.acc;
+  }
+  toast('📜 旧招已填入——按现在这件事改两个字就能用');
+}
 const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',1700);}
 function allStations(){return STATIONS.concat(state.custom);}
@@ -782,7 +843,7 @@ function openBench(id,m){
   if(isS5){const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
     ['done','best'].forEach(k=>{const el=document.getElementById('s5_'+k);if(el)el.value=g[k]||'';});
     renderS5Map();}
-  renderPassCond();
+  renderPassCond();renderOldTricks();
   document.getElementById('bench').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
