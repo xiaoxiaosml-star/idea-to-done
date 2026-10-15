@@ -129,6 +129,16 @@
   <h1><span class="ico">🛠️</span>成事工序台</h1>
   <div class="sub">成事工坊 · 器 ｜ 一道工序 = 一段方法（图纸）+ 一张任务卡（扳手）｜ 来过一关，成一关</div>
 
+  <!-- 事项切换器 -->
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:16px 0 2px">
+    <span style="font-size:13.5px;font-weight:600">📋 当前事项</span>
+    <select id="projSel" onchange="switchProject(this.value)" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--wood-lt);font-size:13.5px;background:#fff;font-family:inherit;max-width:280px"></select>
+    <button class="mini" onclick="newProject()">＋ 新事项</button>
+    <button class="mini" onclick="renameProject()">改名</button>
+    <button class="mini" onclick="deleteProject()">删除</button>
+    <span class="sub" style="font-size:12px">每个事项有自己的流水线、任务卡和结局，数据只在本机浏览器</span>
+  </div>
+
   <!-- 顶部导航: 四个页面 -->
   <div class="topnav">
     <button id="navFlow" class="on" onclick="goView('flow')">🧭 工序</button>
@@ -287,7 +297,24 @@ const STATIONS=[
   ex:{a:'例：把做成的过程按顺序写下来，标出最关键的 3 步',acc:'例：写完读一遍，别人照着这份记录能重走一遍',stop:'例：写不出关键点 → 去找当时的原始记录，不凭记忆编'}}
 ];
 
-let state=load();
+const PKEY='gsc_projects';
+let projects=null;
+function blankState(){return {tasks:[],custom:[],bp:{},outcome:''};}
+function validProjects(p){
+  if(!p||!Array.isArray(p.order)||!p.items)return false;
+  if(!p.order.length)return false;
+  for(const id of p.order){if(!p.items[id]||typeof p.items[id].name!=='string'||!validState(p.items[id].state))return false;}
+  return true;
+}
+projects=loadProjects();
+if(!projects){
+  const legacy=load();                              /* 旧版单一存档 → 第一个事项 */
+  const id='p'+Date.now().toString(36);
+  projects={order:[id],current:id,items:{[id]:{name:'我的第一件事',state:legacy,createdAt:new Date().toISOString()}}};
+  try{localStorage.removeItem('gsc_state');}catch(e){}
+  try{localStorage.setItem(PKEY,JSON.stringify(projects));}catch(e){}   /* 迁移即落盘(state尚未声明,不走persist) */
+}
+let state=projects.items[projects.current].state;
 let cur=null;
 let mode='know';
 
@@ -317,14 +344,76 @@ function load(){
   }catch(e){localStorage.removeItem('gsc_state');}
   return {tasks:[],custom:[],bp:{},outcome:''};
 }
+function loadProjects(){
+  try{
+    const raw=localStorage.getItem(PKEY);
+    if(!raw)return null;
+    const p=JSON.parse(raw);
+    if(validProjects(p)){if(!p.order.includes(p.current))p.current=p.order[0];return p;}
+    return null;
+  }catch(e){return null;}
+}
 function persist(){
-  try{localStorage.setItem('gsc_state',JSON.stringify(state));return true;}
-  catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}
+  try{
+    projects.items[projects.current].state=state;
+    projects.items[projects.current].updatedAt=new Date().toISOString();
+    localStorage.setItem(PKEY,JSON.stringify(projects));
+    return true;
+  }catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}
 }
 function save(){
   const ok=persist();
   renderAll();
   return ok;
+}
+
+/* ===== 事项切换器 ===== */
+function refreshProjBar(){
+  document.getElementById('projSel').innerHTML=projects.order.map(id=>
+    '<option value="'+id+'"'+(id===projects.current?' selected':'')+'>'+esc(projects.items[id].name)+'</option>').join('');
+}
+function switchProject(id){
+  if(id===projects.current||!projects.items[id])return;
+  persist();
+  projects.current=id;
+  state=projects.items[id].state;
+  cur=null;
+  document.getElementById('bench').classList.add('hidden');
+  refreshProjBar();renderAll();goView('flow');
+  toast('已切换到「'+projects.items[id].name+'」');
+}
+function newProject(){
+  const name=(prompt('给这件事起个名字（如：摆摊验证 / 转行准备），每个事项有独立的流水线和结局：')||'').trim();
+  if(!name)return;
+  persist();
+  const id='p'+Date.now().toString(36);
+  projects.order.push(id);
+  projects.items[id]={name:name.slice(0,24),state:blankState(),createdAt:new Date().toISOString()};
+  projects.current=id;state=projects.items[id].state;cur=null;
+  document.getElementById('bench').classList.add('hidden');
+  persist();refreshProjBar();renderAll();goView('flow');
+  toast('新事项「'+projects.items[id].name+'」已建好，从第零关开始');
+}
+function renameProject(){
+  const it=projects.items[projects.current];
+  const name=(prompt('给这件事改个名：',it.name)||'').trim();
+  if(!name)return;
+  it.name=name.slice(0,24);persist();refreshProjBar();toast('已改名');
+}
+function deleteProject(){
+  const it=projects.items[projects.current];
+  if(!confirm('删除事项「'+it.name+'」？其中的任务卡和结局一并删除，不可恢复（可先导出备份）。'))return;
+  projects.order=projects.order.filter(x=>x!==projects.current);
+  delete projects.items[projects.current];
+  if(!projects.order.length){
+    const id='p'+Date.now().toString(36);
+    projects.order=[id];projects.items[id]={name:'我的第一件事',state:blankState(),createdAt:new Date().toISOString()};
+  }
+  projects.current=projects.order[0];
+  state=projects.items[projects.current].state;cur=null;
+  document.getElementById('bench').classList.add('hidden');
+  persist();refreshProjBar();renderAll();goView('flow');
+  toast('已删除，现位于「'+projects.items[projects.current].name+'」');
 }
 const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',1700);}
@@ -597,6 +686,7 @@ function restoreOutcome(){
 
 /* ===== 引导 ===== */
 function closeGuide(){document.getElementById('guideMask').style.display='none';localStorage.setItem('gsc_seen','1');}
+refreshProjBar();
 if(localStorage.getItem('gsc_seen'))document.getElementById('guideMask').style.display='none';
 
 function renderAll(){renderMap();if(cur){renderBp();renderTasks();}renderWeek();restoreOutcome();}
