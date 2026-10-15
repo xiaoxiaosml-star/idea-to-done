@@ -54,6 +54,7 @@
   .node .nm{font-size:15.5px;font-weight:700;margin:3px 0 4px}
   .node .em{font-size:20px}
   .node .pg{font-size:11px;color:var(--muted)}
+  .node .sy{font-size:11px;color:var(--wood);opacity:.82;margin-top:4px;line-height:1.55;min-height:2.9em}
   .node.passed .box{border-color:var(--ok)}
   .node.passed .pg{color:var(--ok);font-weight:600}
   .stamp{position:absolute;top:-12px;right:-8px;background:var(--ok);color:#fff;font-size:10.5px;border-radius:12px;padding:2px 9px;
@@ -272,17 +273,17 @@
 
 <script>
 const STATIONS=[
- {id:'s0',no:'第零关',em:'💡',name:'念头检定',fork:true,bp:['这事有验收标准吗？说不出"怎样算做成"，就不是事，是愿望','最坏结果写出来并标上数字，亏得起才往下走','说不清它具体改变什么生活？先别定性：可能是别人的愿望，也可能只是还没见过真做成的人——去探路；探完路还无感，才打回'],
+ {id:'s0',no:'第零关',em:'💡',name:'念头检定',sy:'翻来覆去想做，就是开不了头',fork:true,bp:['这事有验收标准吗？说不出"怎样算做成"，就不是事，是愿望','最坏结果写出来并标上数字，亏得起才往下走','说不清它具体改变什么生活？先别定性：可能是别人的愿望，也可能只是还没见过真做成的人——去探路；探完路还无感，才打回'],
   ex:{a:'例：把这个念头写成一句话——我要在多长时间内，做到什么具体结果',acc:'例：这句话里有时间、有标准，念给一个朋友听，他能原样复述出来',stop:'例：写不出"怎样算做成"→ 它只是愿望，先放回愿望清单，不占工位'}},
- {id:'s1',no:'第一关',em:'🧭',name:'方向选择',bp:['方向只有两种走法：加盟别人的系统 / 自己干（模式维度的大方向，具体走法看 chapters/02 全文）','先列 3 个你看得见真人在做的方向，不许想空中楼阁','每个方向写一句代价，选你能付得起的那种'],
+ {id:'s1',no:'第一关',em:'🧭',name:'方向选择',sy:'几个方向犹豫不定，拿不准选哪个',bp:['方向只有两种走法：加盟别人的系统 / 自己干（模式维度的大方向，具体走法看 chapters/02 全文）','先列 3 个你看得见真人在做的方向，不许想空中楼阁','每个方向写一句代价，选你能付得起的那种'],
   ex:{a:'例：列出 3 个我看得见真人在做的方向，各写一句要付的代价',acc:'例：3 个方向各有一句具体代价，写在纸上，不是脑子里',stop:'例：想了一周还列不出 3 个 → 先去做份兼职攒见识，这关暂缓，不算失败'}},
- {id:'s2',no:'第二关',em:'🪓',name:'目标拆解',bp:['把目标拆到"拆不动"为止——明天就能做的那一步','每一步配一个方案，方案不是愿望，是有动作的通知单','方案没用就换，不换目标轻易，换的是到达的路'],
+ {id:'s2',no:'第二关',em:'🪓',name:'目标拆解',sy:'知道要干嘛，不知道下一步具体干什么',bp:['把目标拆到"拆不动"为止——明天就能做的那一步','每一步配一个方案，方案不是愿望，是有动作的通知单','方案没用就换，不换目标轻易，换的是到达的路'],
   ex:{a:'例：把目标拆到明天就能做的第一步，小到不能再拆',acc:'例：第一步 30 分钟能做完，且做完后知道下一步是什么',stop:'例：拆不出第一步 → 目标还是口号，回第零关重新检定'}},
- {id:'s3',no:'第三关',em:'🔁',name:'动手迭代',bp:['先做起来，错了改、对了继续','每轮动手前写好止损线，按线执行，不临场改主意','出现正反馈就加码，加码也按事先写的条件来'],
+ {id:'s3',no:'第三关',em:'🔁',name:'动手迭代',sy:'动手了，说不清改了有没有用',bp:['先做起来，错了改、对了继续','每轮动手前写好止损线，按线执行，不临场改主意','出现正反馈就加码，加码也按事先写的条件来'],
   ex:{a:'例：按拆好的第一步真去做一轮，把结果原样记下来',acc:'例：这一轮做完了，手里有一个真实结果——成了败了都算数',stop:'例：触到事前写的止损线 → 按线停，不许临场改主意'}},
- {id:'s4',no:'第四关',em:'🫀',name:'心态续航',bp:['心态不是前提，是经营对象——崩了不等于完了','写下现在的情绪，它就从脑子里的雾变成纸上的字','状态差的时候只做最小动作：打开本子、写一行、发一条'],
+ {id:'s4',no:'第四关',em:'🫀',name:'心态续航',sy:'知道该干嘛，就是不想干、想放弃',bp:['心态不是前提，是经营对象——崩了不等于完了','写下现在的情绪，它就从脑子里的雾变成纸上的字','状态差的时候只做最小动作：打开本子、写一行、发一条'],
   ex:{a:'例：把现在最堵的那口气写成一句话，不修饰',acc:'例：写完了，并给自己排了一个 10 分钟内能做的最小动作',stop:'例：情绪连着一周影响睡觉 → 先处理人，事放一放——这不是放弃，是止损'}},
- {id:'s5',no:'第五关',em:'🏁',name:'做成复盘',bp:['把做成的路径记下来：哪几步是真关键的','转折点各写一句"当时幸亏做了什么"','这份复盘是你下次成事的生产线图纸'],
+ {id:'s5',no:'第五关',em:'🏁',name:'做成复盘',sy:'事做完了，说不清做成了没有',bp:['把做成的路径记下来：哪几步是真关键的','转折点各写一句"当时幸亏做了什么"','这份复盘是你下次成事的生产线图纸'],
   ex:{a:'例：把做成的过程按顺序写下来，标出最关键的 3 步',acc:'例：写完读一遍，别人照着这份记录能重走一遍',stop:'例：写不出关键点 → 去找当时的原始记录，不凭记忆编'}}
 ];
 
@@ -342,7 +343,7 @@ function renderMap(){
     if(done>0)passed++;
     const d=document.createElement('div');
     d.className='node'+(cur===s.id?' on':'')+(done>0?' passed':'');
-    d.innerHTML=`<div class="box"><span class="stamp">已确认</span><div class="em">${esc(s.em||'📌')}</div><div class="no">${esc(s.no)}</div><div class="nm">${esc(s.name)}</div><div class="pg">${doneAll}/${tasks.length} 卡${doneAll>done?' · 缺证据':''}</div></div>`;
+    d.innerHTML=`<div class="box"><span class="stamp">已确认</span><div class="em">${esc(s.em||'📌')}</div><div class="no">${esc(s.no)}</div><div class="nm">${esc(s.name)}</div><div class="sy">${esc(s.sy||'')}</div><div class="pg">${doneAll}/${tasks.length} 卡${doneAll>done?' · 缺证据':''}</div></div>`;
     d.onclick=()=>openBench(s.id);
     el.appendChild(d);
     if(i<sts.length-1){const c=document.createElement('div');c.className='conn';c.textContent='→';el.appendChild(c);}
@@ -401,7 +402,7 @@ function triage(kind){
     hint.textContent='→ 直接送你到第四关"心态续航"：心态不是前提，是经营对象。先稳住人，事才有得谈。';
     openBench('s4');
   }else{
-    hint.textContent='→ 已带你到下面的流水线：卡在哪个环节，就点哪个工位（不必按顺序）。心态崩了别硬扛，回上面点"🫀 心态有点崩"。';
+    hint.textContent='→ 已带你到流水线：每张卡下面写着"卡在这里的样子"，认出哪条像你，点那张卡进工位。心态崩了别硬扛，回上面点"🫀 心态有点崩"。';
     document.getElementById('map').scrollIntoView({behavior:'smooth',block:'center'});
   }
 }
