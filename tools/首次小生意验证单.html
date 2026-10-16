@@ -135,7 +135,7 @@ function cents(id){
   return{s:"ok",c:Math.round(v*100)};
 }
 function yuan(c){return (c/100).toFixed(2)}
-function anyBad(){return NUM_IDS.some(i=>cents(i).s==="bad")||COUNT_IDS.some(i=>countC(i).s==="bad")}
+function anyBad(){let bad=false;NUM_IDS.forEach(i=>{if(cents(i).s==="bad")bad=true});COUNT_IDS.forEach(i=>{if(countC(i).s==="bad")bad=true});return bad;}
 const COUNT_IDS=["r1","r2"];
 /* 三笔账：利润账核心=营业额/已售成本/其他费用；现金账=实际支付-实际收到；库存独立并列展示 */
 function ledger(){
@@ -149,21 +149,36 @@ function ledger(){
   return{t:"ok",gross,profit,h:h.s==="ok"?h.c:null,cash,inv:inv.s==="ok"?inv.c:null};
 }
 function render(){
+  /* 三笔账各自独立成行(与导出同口径): 某项缺失/无效不挡其他账的显示, 已填数值照常算出 */
   const box=document.getElementById("calc");
   const head=migratedNote?('<div style="color:var(--warn);font-size:13px;margin-bottom:6px">'+migratedNote+"</div>"):"";
-  if(anyBad()){box.innerHTML=head+"⚠️ 存在无效输入：金额不能为负，人数/单数必须是整数（如 7.5 人要改成 7 或 8），请检查标红的格子。";return}
-  const r=ledger();
-  if(r.t==="bad"){box.innerHTML=head+"⚠️ 数据异常，请检查输入。";return}
-  if(r.t==="incomplete"){box.innerHTML=head+"①② 利润账：<b>资料不全，无法计算</b>——营业额、已售商品成本、其他费用三项都要填（不知道的先去查，别按 0 算）。";return}
+  const cell=(id,unit)=>{const r=cents(id);return r.s==="ok"?yuan(r.c)+" "+(unit||"元"):(r.s==="bad"?'⚠️'+val(id)+'（无效，未采用）':"（未填）")};
+  const rev=cents("r3"),cogs=cents("r4"),fee=cents("r5"),h=cents("r6"),paid=cents("r8"),got=cents("r7"),inv=cents("r9");
   const lines=[];
-  lines.push("① 利润账：营业额 "+yuan(cents("r3").c)+" - 已售商品成本 "+yuan(cents("r4").c)+" = 毛利 "+yuan(r.gross)+"；再减其他费用 "+yuan(cents("r5").c)+" = <b>净利 "+yuan(r.profit)+" 元</b>");
-  if(r.h!==null)lines.push(r.h>0?"② 时间账："+(r.h/100)+" 小时 → 时薪约 <b>"+yuan(Math.round(r.profit/r.h*100))+" 元</b>（跟当地零工价比一比）":"② 时间账：投入工时为 0，<b>时薪无法计算</b>——请核对时间投入是否漏填");
-  if(r.cash!==null)lines.push("③ 现金账：实际支付 "+yuan(cents("r8").c)+" - 实际收到 "+yuan(cents("r7").c)+" = 现金净流出 <b>"+yuan(r.cash)+" 元</b>");
-  else lines.push("③ 现金账：实际收到/实际支付未填齐，无法计算");
-  if(r.inv!==null&&r.cash!==null)lines.push("📦 剩余库存成本价值 "+yuan(r.inv)+" 元——货还在你手里，和上面的现金净流出是两笔并列的账");
-  if(r.profit>0)lines.push("✅ 净利为正——但一单不算赢，陌生客户连续成交再谈加码");
-  else if(r.profit===0)lines.push("➖ 收支持平：没赚也没亏，但时间花掉了——按「支持继续的信号」判断下一步");
-  else lines.push("⚠️ 净利为负：营业额高不等于赚钱，先查哪笔账漏了");
+  if(anyBad())lines.push('⚠️ 存在无效输入：金额不能为负，人数/单数必须是整数（如 7.5 人要改成 7 或 8），请检查标红的格子。');
+  if(rev.s==="ok"&&cogs.s==="ok"&&fee.s==="ok"){
+    const gross=rev.c-cogs.c,profit=gross-fee.c;
+    lines.push("① 利润账：营业额 "+yuan(rev.c)+" - 已售商品成本 "+yuan(cogs.c)+" = 毛利 "+yuan(gross)+"；再减其他费用 "+yuan(fee.c)+" = <b>净利 "+yuan(profit)+" 元</b>");
+  }else{
+    lines.push("① 利润账：营业额 "+cell("r3")+" / 已售商品成本 "+cell("r4")+" / 其他费用 "+cell("r5")+"——未填齐，无法计算");
+  }
+  if(h.s==="bad")lines.push("② 时间账：⚠️"+val("r6")+"（无效，未采用）");
+  else if(h.s==="ok"){
+    if(h.c===0)lines.push("② 时间账：投入工时为 0，<b>时薪无法计算</b>——请核对时间投入是否漏填");
+    else if(rev.s==="ok"&&cogs.s==="ok"&&fee.s==="ok")lines.push("② 时间账："+(h.c/100)+" 小时 → 时薪约 <b>"+yuan(Math.round((rev.c-cogs.c-fee.c)/h.c*100))+" 元</b>（跟当地零工价比一比）");
+    else lines.push("② 时间账："+(h.c/100)+" 小时（利润账未算出，时薪无法计算）");
+  }
+  if(paid.s==="ok"&&got.s==="ok")lines.push("③ 现金账：实际支付 "+yuan(paid.c)+" - 实际收到 "+yuan(got.c)+" = 现金净流出 <b>"+yuan(paid.c-got.c)+" 元</b>");
+  else if(paid.s!=="empty"||got.s!=="empty")lines.push("③ 现金账：实际支付 "+cell("r8")+" / 实际收到 "+cell("r7")+"——未填齐，无法计算");
+  if(inv.s==="ok"&&paid.s==="ok"&&got.s==="ok")lines.push("📦 剩余库存成本价值 "+yuan(inv.c)+" 元——货还在你手里，和上面的现金净流出是两笔并列的账");
+  else if(inv.s==="bad")lines.push("📦 剩余库存：⚠️"+val("r9")+"（无效，未采用）");
+  if(rev.s==="ok"&&cogs.s==="ok"&&fee.s==="ok"){
+    const profit=rev.c-cogs.c-fee.c;
+    if(profit>0)lines.push("✅ 净利为正——但一单不算赢，陌生客户连续成交再谈加码");
+    else if(profit===0)lines.push("➖ 收支持平：没赚也没亏，但时间花掉了——按「支持继续的信号」判断下一步");
+    else lines.push("⚠️ 净利为负：营业额高不等于赚钱，先查哪笔账漏了");
+  }
+  if(!lines.length)lines.push("填入数字后，这里自动算三笔账。");
   box.innerHTML=head+lines.join("<br>");
 }
 IDS.forEach(i=>document.getElementById(i).addEventListener("input",render));
@@ -206,10 +221,10 @@ function clearAll(){
 }
 function exportMd(){
   /* 缺项也要导出: 每一笔账独立成行, 已填的数值原样保留, 没填的标（未填）, 无效标⚠️——不因某项缺失丢掉其他已填数据 */
-  const cell=id=>{const r=cents(id);return r.s==="ok"?yuan(r.c)+" 元":(r.s==="bad"?"⚠️"+val(id)+"（无效，未采用）":"（未填）")};
+  const cell=(id,unit)=>{const r=cents(id);return r.s==="ok"?yuan(r.c)+" "+(unit||"元"):(r.s==="bad"?"⚠️"+val(id)+"（无效，未采用）":"（未填）")};
   const L=["# 首次小生意验证单","","> 导出时间："+new Date().toLocaleString(),"","## 一、四行字",
   "- 验证什么："+(val("q1")||"（未填）"),
-  "- 最多投入："+(cents("q2a").s==="ok"?yuan(cents("q2a").c)+" 元":"（未填）")+" / "+(cents("q2b").s==="ok"?yuan(cents("q2b").c)+" 小时":"（未填）"),
+  "- 最多投入："+cell("q2a","元")+" / "+cell("q2b","小时"),
   "- 支持继续的信号："+(val("q3")||"（未填）"),
   "- 停止条件："+(val("q4")||"（未填）"),"","## 二、结果与三笔账",
   "- 触达："+countOr("r1")+" 人，成交 "+countOr("r2")+" 单"];
