@@ -623,6 +623,7 @@ function refreshProjBar(){
 }
 function switchProject(id){
   if(id===projects.current||!projects.items[id])return;
+  const wasDirty=isDirty();   /* 导航前是否已有真实未保存编辑: 有就不能因导航清掉脏状态 */
   if(!LOCKOK||_writer===true)persist();   /* 只读/判定中的页不碰 persist: 它会先改 updatedAt 造成假脏, 凭空造"被拦编辑"副本 */
   projects.current=id;
   state=projects.items[id].state;
@@ -630,7 +631,7 @@ function switchProject(id){
   document.getElementById('bench').classList.add('hidden');
   refreshProjBar();renderAll();goView('flow');
   toast('已切换到「'+projects.items[id].name+'」');
-  if(LOCKOK&&_writer!==true)syncBase();   /* 导航本身不是编辑: 导航完成后同步基线, 真编辑再算脏 */
+  if(LOCKOK&&_writer!==true&&!wasDirty)syncBase();   /* 只有原本干净的只读页才把纯导航认作新基线; 有未保存编辑的保持脏, 保住故障解除后 markStale 的补备份路径 */
 }
 function newProject(){
   const name=(prompt('给这件事起个名字（如：摆摊验证 / 转行准备），每个事项有独立的流水线和结局：')||'').trim();
