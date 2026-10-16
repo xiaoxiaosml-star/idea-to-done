@@ -414,15 +414,24 @@ let projects=null;
 let _ver=0;          /* 存档版本号: 降级模式(无锁API)下拦顺序过期写入的基准 */
 let _stale=false;    /* 本页快照已过期/只读, 停止写入等处置 */
 let _corruptRaw=null;/* 存档校验未过时的原始内容: 绝不能用空白档覆盖它 */
+let _lockFault=false;/* 锁API存在但申请失败 */
+let _baseSnap=null;  /* 最近一次成功落盘的正式档快照: 判断本页有没有"未保存的新改动" */
+let _pendingMigration=false;   /* 检测到旧档: 定盘推迟到确认写者身份后 */
+let _pendingInit=false;        /* 首启起步项目: 同上 */
 const LOCKOK=(typeof navigator!=='undefined')&&!!(navigator.locks&&navigator.locks.request);
-let _writer=null;    /* Web Locks 单写者: null=未定, true=持有写锁(唯一写者), false=只读页 */
+let _writer=null;    /* 写者身份: true=持锁唯一写者 / false=只读 / null=判定中 */
 const _tabId=(function(){try{let t=sessionStorage.getItem('gsc_tab');if(!t){t='t'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);sessionStorage.setItem('gsc_tab',t);}return t;}catch(e){return 't'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}})();
+const _docId='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);   /* 每次文档加载唯一: 刷新/复制会话存储都不复用, 已有待恢复副本不会被自己覆盖 */
 if(LOCKOK){
   navigator.locks.request('gsc_writer',{mode:'exclusive',ifAvailable:true},lock=>{
-    if(lock){_writer=true;return new Promise(()=>{});}  /* 永不resolve: 持锁到页面关闭(崩溃由浏览器回收) */
-    _writer=false;markStale();                          /* 另一页正在编辑 → 本页只读+留备份 */
-  }).catch(()=>{_writer=true;});
-}else{_writer=true;}                   /* 无锁API的环境: 降级版本CAS(拦顺序过期, 非互斥) */
+    if(lock){_writer=true;initWriteDuties();return new Promise(()=>{});}  /* 持锁到页面关闭(崩溃由浏览器回收) */
+    _writer=false;markStale();                                            /* 另一页正在编辑 → 本页只读+留备份 */
+  }).catch(()=>{_writer=false;_lockFault=true;markStale();});             /* 申请失败 ≠ 可写: 保留只读故障态 */
+}else{
+  _writer=true;                                                          /* 无锁API: 明确降级, 单页使用无并发互斥保证 */
+  initWriteDuties();
+  setTimeout(()=>toast('⚠️ 当前浏览器不支持多标签页写锁：请只在一个标签页使用本工具，否则两个页面可能互相覆盖'),900);
+}
 function blankState(){return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};}
 function validProjects(p){
   if(!p||!Array.isArray(p.order)||!p.items||typeof p.items!=='object')return false;
@@ -443,14 +452,11 @@ if(!projects){
     projects={order:[id],current:id,ver:0,items:{[id]:{name:'临时工作区（原存档待修复）',state:blankState(),createdAt:new Date().toISOString()}}};
     _ver=0;
   }else{
-    const legacy=load();                              /* 旧版单一存档 → 第一个事项 */
+    const legacy=load();                              /* 旧版单一存档 → 第一个事项(先只读进来) */
+    let hasLegacy=false;try{hasLegacy=localStorage.getItem('gsc_state')!==null;}catch(e){}
     const id='p'+Date.now().toString(36);
     projects={order:[id],current:id,ver:1,items:{[id]:{name:'我的第一件事',state:legacy,createdAt:new Date().toISOString()}}};
-    try{
-      localStorage.setItem(PKEY,JSON.stringify(projects));   /* 先写新键 */
-      _ver=1;
-      try{localStorage.removeItem('gsc_state');}catch(e){}   /* 新键落盘成功后才删旧键 */
-    }catch(e){}
+    if(hasLegacy)_pendingMigration=true;else _pendingInit=true;   /* 定盘推迟到 initWriteDuties 确认写者身份后 */
   }
 }
 let state=projects.items[projects.current].state;
@@ -498,12 +504,12 @@ function normState(s){if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome=''
 function load(){
   try{
     const raw=localStorage.getItem('gsc_state');
-    if(!raw)return {tasks:[],custom:[],bp:{},outcome:''};
+    if(!raw)return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};
     const s=JSON.parse(raw);
     if(validState(s)){if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';return s;}
     localStorage.removeItem('gsc_state');
   }catch(e){localStorage.removeItem('gsc_state');}
-  return {tasks:[],custom:[],bp:{},outcome:''};
+  return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};
 }
 function bumpIdFloor(p){try{let m=0;for(const id of p.order){const it=p.items[id];if(!it||!it.state)continue;for(const t of it.state.tasks){if(typeof t.id==='number'&&t.id>m)m=t.id;}}if(m>_tidSeq)_tidSeq=m;}catch(e){}}
 function loadProjects(){
@@ -516,33 +522,60 @@ function loadProjects(){
       _ver=(typeof p.ver==='number')?p.ver:0;
       for(const id of p.order)normState(p.items[id].state);
       bumpIdFloor(p);
+      _baseSnap=JSON.stringify(p);         /* 归一化之后的快照才是"无改动"基线(此时 projects 尚未赋值, 不能走 syncBase) */
       return p;}
     _corruptRaw=raw;   /* 校验未过: 保留原始内容, 返回null但绝不做迁移覆盖 */
     return null;
   }catch(e){try{_corruptRaw=localStorage.getItem(PKEY);}catch(e2){}return null;}
 }
 function readStoredVer(){try{const raw=localStorage.getItem(PKEY);if(!raw)return null;const p=JSON.parse(raw);return (p&&typeof p.ver==='number')?p.ver:null;}catch(e){return null;}}
-function conflictKey(){return CKEY+'_'+_tabId;}
+function conflictKey(){return CKEY+'_'+_docId;}
 function listConflicts(){const out=[];try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k===CKEY||k.indexOf(CKEY+'_')===0)out.push(k);}}catch(e){}return out.sort();}
 function readConflict(k){try{const r=localStorage.getItem(k);return r?JSON.parse(r):null;}catch(e){return null;}}
+function syncBase(){try{_baseSnap=JSON.stringify(projects);}catch(e){}}
+function isDirty(){if(_baseSnap===null)return true;try{return JSON.stringify(projects)!==_baseSnap;}catch(e){return true;}}
+/* 首启/迁移的定盘: 只在确认持锁写者后执行; 锁内重新读正式档, 发现别的写者已建好就重载采用 */
+function initWriteDuties(){
+  if(_corruptRaw||_writer!==true)return;
+  if(!_pendingMigration&&!_pendingInit)return;
+  const storedVer=readStoredVer();
+  if(storedVer!==null){location.reload();return;}
+  if(_pendingMigration){
+    try{
+      localStorage.setItem(PKEY,JSON.stringify(projects));   /* 先写新键 */
+      _ver=projects.ver;
+      syncBase();
+      try{localStorage.removeItem('gsc_state');}catch(e){}   /* 新键落盘成功后才删旧键 */
+    }catch(e){}
+  }else{
+    const v=commitProjects(projects);
+    if(v!==false)_ver=v;
+  }
+  _pendingMigration=false;_pendingInit=false;
+}
 function markStale(){
   const first=!_stale;_stale=true;
+  if(!isDirty()){   /* 没有未保存的新改动: 只读即可, 不制造/覆盖任何待恢复副本 */
+    if(first)toast(_lockFault
+      ?'⚠️ 写锁申请失败（浏览器异常），本页无法取得写入权限，转为只读。你的数据与正式档一致，没有未保存的修改'
+      :'⚠️ 另一页正在编辑或已保存了更新，本页转为只读。你的数据与正式档一致，没有未保存的修改');
+    return;
+  }
   let backed=false;
-  try{localStorage.setItem(conflictKey(),JSON.stringify({when:Date.now(),tab:_tabId,projects}));backed=true;}catch(e){}
-  if(first)toast(backed
-    ?'⚠️ 另一页正在编辑或已保存了更新，本页已停止自动保存，防止互相覆盖。本页的修改已备份，到「💾 数据」页可导出或选择覆盖'
-    :'⚠️ 本页已停止自动保存，但备份写入失败——当前修改只在内存里，请立即手动导出 JSON 备份');
-  else if(!backed)toast('⚠️ 备份写入失败——当前修改只在内存里，请立即手动导出 JSON 备份');
+  try{localStorage.setItem(conflictKey(),JSON.stringify({when:Date.now(),tab:_tabId,doc:_docId,projects}));backed=true;}catch(e){}
+  if(backed){if(first)toast('⚠️ '+(_lockFault?'写锁申请失败，本页转为只读':'另一页正在编辑或已保存了更新')+'，已停止自动保存，防止互相覆盖。本页的修改已备份，到「💾 数据」页可导出或选择覆盖');}
+  else toast('⚠️ 备份写入失败——当前修改只在内存里，请立即手动导出 JSON 备份');
 }
-/* 所有正式档写入的唯一入口: 单写者(Web Locks) + 版本CAS(降级) + 坏档保护。只有写成功才返回新版本号。 */
-function commitProjects(obj){
-  if(_corruptRaw){toast('⚠️ 当前存档校验未过，已停止写入以保住原始数据——请到「💾 数据」页导出原始档修复');return false;}
-  if(LOCKOK&&_writer===false){markStale();return false;}
+/* 所有共享写入的唯一纪律: 只有持锁写者(true)能写; 判定中(null)/只读(false)/锁故障 一律拒。
+   覆盖正式档/回收站/坏档弃置/初始化都必须过这道闸(回收站等另有自己的守卫)。 */
+function commitProjects(obj,ignoreCorrupt){
+  if(_corruptRaw&&!ignoreCorrupt){toast('⚠️ 当前存档校验未过，已停止写入以保住原始数据——请到「💾 数据」页导出原始档修复');return false;}
+  if(LOCKOK&&_writer!==true){markStale();return false;}
   const storedVer=readStoredVer();
   if(storedVer!==null&&storedVer>_ver){markStale();return false;}   /* 过期页禁止写入 */
   obj.ver=(storedVer!==null?storedVer:_ver)+1;
   try{localStorage.setItem(PKEY,JSON.stringify(obj));}
-  catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}
+  catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}   /* 失败: 版本不推进 */
   return obj.ver;
 }
 function persist(){
@@ -550,7 +583,7 @@ function persist(){
     projects.items[projects.current].state=state;
     projects.items[projects.current].updatedAt=new Date().toISOString();
     const v=commitProjects(projects);
-    if(v!==false)_ver=v;    /* 只有写成功才推进本页版本: 失败重试不会跳过别人的版本 */
+    if(v!==false){_ver=v;syncBase();}    /* 只有写成功才推进版本并刷新干净基线 */
     return v!==false;
   }catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}
 }
@@ -1122,7 +1155,8 @@ const TRASH_CAP=100;
 function loadTrash(){try{const r=localStorage.getItem(TKEY);const t=r?JSON.parse(r):[];return Array.isArray(t)?t:[];}catch(e){return[];}}
 function saveTrash(t){try{localStorage.setItem(TKEY,JSON.stringify(t.slice(-TRASH_CAP)));return true;}catch(e){return false;}}
 function trashArr(){return loadTrash().map((x,idx)=>({x,idx})).filter(o=>Date.now()-o.x.when<30*864e5);}
-function trashPut(entry){const t=loadTrash().filter(x=>Date.now()-x.when<30*864e5);t.push(entry);return saveTrash(t);}
+function trashGuard(){if(LOCKOK&&_writer!==true){toast('⚠️ 本页为只读（另一页正在编辑），回收站也不能修改');return false;}return true;}
+function trashPut(entry){if(!trashGuard())return false;const t=loadTrash().filter(x=>Date.now()-x.when<30*864e5);t.push(entry);return saveTrash(t);}
 function renderTrash(){
   renderConflict();
   const el=document.getElementById('trashList');if(!el)return;
@@ -1137,6 +1171,7 @@ function renderTrash(){
   }).join('');
 }
 function restoreTrash(i){
+  if(!trashGuard())return;
   const arr=trashArr().slice().reverse();const o=arr[i];if(!o)return;
   const x=o.x;
   let cand;try{cand=JSON.parse(JSON.stringify(projects));}catch(e){toast('⚠️ 内存不足，无法准备恢复');return;}
@@ -1170,7 +1205,7 @@ function restoreTrash(i){
   }
   const v=commitProjects(cand);           /* 整套要么落盘要么不动, 没有半截回滚 */
   if(v===false){toast('⚠️ 存储失败或被拦，恢复未完成——记录仍留在回收站');return;}
-  projects=cand;_ver=v;
+  projects=cand;_ver=v;syncBase();
   if(!projects.order.includes(projects.current))projects.current=projects.order[0];
   state=projects.items[projects.current].state;
   const t=loadTrash();t.splice(o.idx,1);saveTrash(t);
@@ -1178,10 +1213,11 @@ function restoreTrash(i){
   refreshProjBar();renderAll();renderTrash();
 }
 function dropTrash(i){
+  if(!trashGuard())return;
   const arr=trashArr().slice().reverse();const o=arr[i];if(!o)return;
   const t=loadTrash();t.splice(o.idx,1);saveTrash(t);renderTrash();
 }
-function emptyTrash(){if(!confirm('彻底清空回收站？其中的内容将不可恢复。'))return;saveTrash([]);renderTrash();}
+function emptyTrash(){if(!trashGuard())return;if(!confirm('彻底清空回收站？其中的内容将不可恢复。'))return;saveTrash([]);renderTrash();}
 /* ===== 被拦下修改的备份恢复(每页一个槽, 互不覆盖) ===== */
 function renderConflict(){
   const el=document.getElementById('conflictBox');if(!el)return;
@@ -1211,13 +1247,18 @@ function downloadCorrupt(){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='工序台_待修复原始档.json';a.click();
 }
 function discardCorrupt(){
+  if(LOCKOK&&_writer!==true){toast('⚠️ 本页为只读，不能弃置存档——请在持有写权限的页面操作');return;}
+  let cur=null;try{cur=localStorage.getItem(PKEY);}catch(e){}
+  if(cur!==_corruptRaw){toast('⚠️ 存档自打开以来已变化（可能另一页已修复），请刷新后再决定');return;}  /* 新鲜度: 只能弃置自己看到的那份 */
   if(!confirm('放弃原始损坏档？它将不可恢复，并以空白工作区重新开始。'))return;
-  try{localStorage.removeItem(PKEY);}catch(e){}
-  _corruptRaw=null;_stale=false;
   const id='p'+Date.now().toString(36);
-  projects={order:[id],current:id,items:{[id]:{name:'我的第一件事',state:blankState(),createdAt:new Date().toISOString()}}};
+  const cand={order:[id],current:id,items:{[id]:{name:'我的第一件事',state:blankState(),createdAt:new Date().toISOString()}}};
+  const v=commitProjects(cand,true);   /* 先写新档成功, 才弃旧 */
+  if(v===false){toast('重建空白档失败，原始档未动');return;}
+  projects=cand;_ver=v;
   state=projects.items[id].state;cur=null;
-  persist();refreshProjBar();renderAll();renderTrash();toast('已以空白工作区重新开始');
+  _corruptRaw=null;_stale=false;syncBase();
+  refreshProjBar();renderAll();renderTrash();toast('已以空白工作区重新开始');
 }
 function downloadConflict(k){
   const c=readConflict(k);if(!c)return;
@@ -1227,19 +1268,21 @@ function downloadConflict(k){
 function adoptConflict(k){
   const c=readConflict(k);if(!c){toast('这版备份不存在了');return;}
   if(!validProjects(c.projects)){toast('这版备份结构已损坏，不敢覆盖');return;}
+  if(LOCKOK&&_writer!==true){toast('⚠️ 本页为只读，不能覆盖——请在持有写权限的页面操作');return;}
   if(!confirm('用被拦下的这版覆盖当前存档？另一个标签页保存的更新将丢失。'))return;
   let cand;try{cand=JSON.parse(JSON.stringify(c.projects));}catch(e){toast('准备覆盖副本失败');return;}
   for(const id of cand.order)normState(cand.items[id].state);
   if(!cand.order.includes(cand.current))cand.current=cand.order[0];
   const v=commitProjects(cand);   /* 先落盘候选, 成功才换活动状态 */
   if(v===false){toast('覆盖失败，什么都没动——这版备份仍保留，可重试');return;}
-  projects=cand;_ver=v;_stale=false;bumpIdFloor(projects);
+  projects=cand;_ver=v;_stale=false;bumpIdFloor(projects);syncBase();
   state=projects.items[projects.current].state;cur=null;
   document.getElementById('bench').classList.add('hidden');
   try{localStorage.removeItem(k);}catch(e){}
   refreshProjBar();renderAll();renderTrash();toast('已用备份版本覆盖当前存档');
 }
 function dropConflict(k){
+  if(LOCKOK&&_writer!==true){toast('⚠️ 本页为只读，不能丢弃备份');return;}
   if(!confirm('丢弃这版被拦下的修改？它将不可恢复。'))return;
   try{localStorage.removeItem(k);}catch(e){}
   renderConflict();
@@ -1323,6 +1366,7 @@ function importJSON(e){
   r.onload=()=>{
     let s=null;try{s=JSON.parse(r.result);}catch(err){toast('文件不是有效 JSON，未导入');e.target.value='';return;}
     if(s&&s.projects&&validProjects(s.projects)){
+      if(LOCKOK&&_writer!==true){toast('⚠️ 本页为只读，不能导入——请在持有写权限的页面操作');e.target.value='';return;}
       if(!confirm('这是「全部事项」备份（'+s.projects.order.length+'个事项），导入将替换当前所有事项，继续？')){e.target.value='';return;}
       let cand;
       try{cand=JSON.parse(JSON.stringify(s.projects));}catch(err){toast('内存不足，未导入');e.target.value='';return;}
@@ -1330,20 +1374,21 @@ function importJSON(e){
       if(!cand.order.includes(cand.current))cand.current=cand.order[0];
       const v=commitProjects(cand);
       if(v===false){toast('导入失败：存储不可用或本页已被拦，当前进度未受影响');e.target.value='';return;}
-      projects=cand;_ver=v;bumpIdFloor(projects);
+      projects=cand;_ver=v;bumpIdFloor(projects);syncBase();
       state=projects.items[projects.current].state;cur=null;
       document.getElementById('bench').classList.add('hidden');
       refreshProjBar();renderAll();toast('全部事项已导入');
       e.target.value='';return;
     }
     if(validState(s)){
+      if(LOCKOK&&_writer!==true){toast('⚠️ 本页为只读，不能导入——请在持有写权限的页面操作');e.target.value='';return;}
       normState(s);
       let cand;
       try{cand=JSON.parse(JSON.stringify(projects));}catch(err){toast('内存不足，未导入');e.target.value='';return;}
       cand.items[cand.current].state=s;
       const v=commitProjects(cand);
       if(v===false){toast('导入失败：存储不可用或本页已被拦，当前进度未受影响');e.target.value='';return;}
-      projects=cand;_ver=v;
+      projects=cand;_ver=v;syncBase();
       state=projects.items[projects.current].state;cur=null;
       document.getElementById('bench').classList.add('hidden');
       renderAll();toast('进度已导入');
