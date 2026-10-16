@@ -411,8 +411,18 @@ const PKEY='gsc_projects';
 let _tidSeq=0;
 function newTaskId(){const n=Date.now();_tidSeq=_tidSeq>=n?_tidSeq+1:n;return _tidSeq;}
 let projects=null;
-let _ver=0;          /* 存档版本号: 多标签页防覆盖的比对基准 */
-let _stale=false;    /* 本页快照已过期(别处于我之后保存过更新), 停止写入等处置 */
+let _ver=0;          /* 存档版本号: 降级模式(无锁API)下拦顺序过期写入的基准 */
+let _stale=false;    /* 本页快照已过期/只读, 停止写入等处置 */
+let _corruptRaw=null;/* 存档校验未过时的原始内容: 绝不能用空白档覆盖它 */
+const LOCKOK=(typeof navigator!=='undefined')&&!!(navigator.locks&&navigator.locks.request);
+let _writer=null;    /* Web Locks 单写者: null=未定, true=持有写锁(唯一写者), false=只读页 */
+const _tabId=(function(){try{let t=sessionStorage.getItem('gsc_tab');if(!t){t='t'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);sessionStorage.setItem('gsc_tab',t);}return t;}catch(e){return 't'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}})();
+if(LOCKOK){
+  navigator.locks.request('gsc_writer',{mode:'exclusive',ifAvailable:true},lock=>{
+    if(lock){_writer=true;return new Promise(()=>{});}  /* 永不resolve: 持锁到页面关闭(崩溃由浏览器回收) */
+    _writer=false;markStale();                          /* 另一页正在编辑 → 本页只读+留备份 */
+  }).catch(()=>{_writer=true;});
+}else{_writer=true;}                   /* 无锁API的环境: 降级版本CAS(拦顺序过期, 非互斥) */
 function blankState(){return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};}
 function validProjects(p){
   if(!p||!Array.isArray(p.order)||!p.items||typeof p.items!=='object')return false;
@@ -427,14 +437,21 @@ function validProjects(p){
 }
 projects=loadProjects();
 if(!projects){
-  const legacy=load();                              /* 旧版单一存档 → 第一个事项 */
-  const id='p'+Date.now().toString(36);
-  projects={order:[id],current:id,ver:1,items:{[id]:{name:'我的第一件事',state:legacy,createdAt:new Date().toISOString()}}};
-  try{
-    localStorage.setItem(PKEY,JSON.stringify(projects));   /* 先写新键 */
-    _ver=1;
-    try{localStorage.removeItem('gsc_state');}catch(e){}   /* 新键落盘成功后才删旧键 */
-  }catch(e){}
+  if(_corruptRaw){
+    /* 存档校验未过: 只开临时工作区, 不persist, 绝不能用空白档覆盖原始内容 */
+    const id='p'+Date.now().toString(36);
+    projects={order:[id],current:id,ver:0,items:{[id]:{name:'临时工作区（原存档待修复）',state:blankState(),createdAt:new Date().toISOString()}}};
+    _ver=0;
+  }else{
+    const legacy=load();                              /* 旧版单一存档 → 第一个事项 */
+    const id='p'+Date.now().toString(36);
+    projects={order:[id],current:id,ver:1,items:{[id]:{name:'我的第一件事',state:legacy,createdAt:new Date().toISOString()}}};
+    try{
+      localStorage.setItem(PKEY,JSON.stringify(projects));   /* 先写新键 */
+      _ver=1;
+      try{localStorage.removeItem('gsc_state');}catch(e){}   /* 新键落盘成功后才删旧键 */
+    }catch(e){}
+  }
 }
 let state=projects.items[projects.current].state;
 let cur=null;
@@ -474,7 +491,7 @@ function validState(s){
   if(s.outcome!==undefined&&!['','done','go','stop','explore'].includes(s.outcome))return false;
   return true;
 }
-function normState(s){if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';
+function normState(s){if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';if(!s.custom)s.custom=[];if(!s.bp)s.bp={};
   const g=s.goal.s5;
   if(g&&g.keys){for(const id of Object.keys(g.keys)){if(!s.tasks.some(t=>t.id===Number(id)))delete g.keys[id];}}
   return s;}
@@ -488,6 +505,7 @@ function load(){
   }catch(e){localStorage.removeItem('gsc_state');}
   return {tasks:[],custom:[],bp:{},outcome:''};
 }
+function bumpIdFloor(p){try{let m=0;for(const id of p.order){const it=p.items[id];if(!it||!it.state)continue;for(const t of it.state.tasks){if(typeof t.id==='number'&&t.id>m)m=t.id;}}if(m>_tidSeq)_tidSeq=m;}catch(e){}}
 function loadProjects(){
   try{
     const raw=localStorage.getItem(PKEY);
@@ -497,29 +515,46 @@ function loadProjects(){
       if(!p.order.includes(p.current))p.current=p.order[0];
       _ver=(typeof p.ver==='number')?p.ver:0;
       for(const id of p.order)normState(p.items[id].state);
+      bumpIdFloor(p);
       return p;}
+    _corruptRaw=raw;   /* 校验未过: 保留原始内容, 返回null但绝不做迁移覆盖 */
     return null;
-  }catch(e){return null;}
+  }catch(e){try{_corruptRaw=localStorage.getItem(PKEY);}catch(e2){}return null;}
 }
 function readStoredVer(){try{const raw=localStorage.getItem(PKEY);if(!raw)return null;const p=JSON.parse(raw);return (p&&typeof p.ver==='number')?p.ver:null;}catch(e){return null;}}
+function conflictKey(){return CKEY+'_'+_tabId;}
+function listConflicts(){const out=[];try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k===CKEY||k.indexOf(CKEY+'_')===0)out.push(k);}}catch(e){}return out.sort();}
+function readConflict(k){try{const r=localStorage.getItem(k);return r?JSON.parse(r):null;}catch(e){return null;}}
 function markStale(){
   const first=!_stale;_stale=true;
-  try{localStorage.setItem(CKEY,JSON.stringify({when:Date.now(),projects}));}catch(e){}   /* 每次都刷新备份: 内存可能又改了 */
-  if(first)toast('⚠️ 另一个标签页已保存了更新，本页已停止自动保存，防止互相覆盖。本页的修改已备份，到「💾 数据」页可导出或选择覆盖');
+  let backed=false;
+  try{localStorage.setItem(conflictKey(),JSON.stringify({when:Date.now(),tab:_tabId,projects}));backed=true;}catch(e){}
+  if(first)toast(backed
+    ?'⚠️ 另一页正在编辑或已保存了更新，本页已停止自动保存，防止互相覆盖。本页的修改已备份，到「💾 数据」页可导出或选择覆盖'
+    :'⚠️ 本页已停止自动保存，但备份写入失败——当前修改只在内存里，请立即手动导出 JSON 备份');
+  else if(!backed)toast('⚠️ 备份写入失败——当前修改只在内存里，请立即手动导出 JSON 备份');
+}
+/* 所有正式档写入的唯一入口: 单写者(Web Locks) + 版本CAS(降级) + 坏档保护。只有写成功才返回新版本号。 */
+function commitProjects(obj){
+  if(_corruptRaw){toast('⚠️ 当前存档校验未过，已停止写入以保住原始数据——请到「💾 数据」页导出原始档修复');return false;}
+  if(LOCKOK&&_writer===false){markStale();return false;}
+  const storedVer=readStoredVer();
+  if(storedVer!==null&&storedVer>_ver){markStale();return false;}   /* 过期页禁止写入 */
+  obj.ver=(storedVer!==null?storedVer:_ver)+1;
+  try{localStorage.setItem(PKEY,JSON.stringify(obj));}
+  catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}
+  return obj.ver;
 }
 function persist(){
   try{
-    const storedVer=readStoredVer();
-    if(storedVer!==null&&storedVer>_ver){markStale();return false;}   /* 过期页禁止写入 */
     projects.items[projects.current].state=state;
     projects.items[projects.current].updatedAt=new Date().toISOString();
-    projects.ver=(storedVer!==null?storedVer:_ver)+1;
-    _ver=projects.ver;
-    localStorage.setItem(PKEY,JSON.stringify(projects));
-    return true;
+    const v=commitProjects(projects);
+    if(v!==false)_ver=v;    /* 只有写成功才推进本页版本: 失败重试不会跳过别人的版本 */
+    return v!==false;
   }catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}
 }
-window.addEventListener('storage',ev=>{   /* 别处置于本页之后的保存, 立即把本页标记过期 */
+window.addEventListener('storage',ev=>{   /* 别处置于本页之后的保存, 立即把本页标记过期(降级模式) */
   if(ev.key!==PKEY)return;
   const v=readStoredVer();
   if(v!==null&&v>_ver)markStale();
@@ -1101,36 +1136,45 @@ function renderTrash(){
       +'<button class="mini" onclick="dropTrash('+i+')">彻底删</button></div>';
   }).join('');
 }
-function remapS5Key(st,oldId,newId){const g=st.goal&&st.goal.s5;if(g&&g.keys&&g.keys[oldId]!==undefined){g.keys[newId]=g.keys[oldId];delete g.keys[oldId];}}
 function restoreTrash(i){
   const arr=trashArr().slice().reverse();const o=arr[i];if(!o)return;
-  const x=o.x;let ok=false;
+  const x=o.x;
+  let cand;try{cand=JSON.parse(JSON.stringify(projects));}catch(e){toast('⚠️ 内存不足，无法准备恢复');return;}
+  cand.items[cand.current].state=state;   /* 当前事项的最新内存状态先同步进候选 */
+  let msg='';
   if(x.type==='project'){
-    if(projects.order.includes(x.data.id)){toast('该事项已存在，无需恢复');}
-    else{
-      const at=Math.min(x.data.orderIdx!=null?x.data.orderIdx:projects.order.length,projects.order.length);
-      projects.order.splice(at,0,x.data.id);
-      projects.items[x.data.id]={name:x.data.name,state:x.data.state,createdAt:x.data.createdAt||new Date().toISOString()};
-      if(persist()){ok=true;toast('已恢复事项「'+x.data.name+'」');}
-      else{projects.order=projects.order.filter(y=>y!==x.data.id);delete projects.items[x.data.id];toast('⚠️ 存储失败，恢复未完成——记录仍留在回收站');}
-    }
+    if(cand.order.includes(x.data.id)){toast('该事项已存在，无需恢复');return;}
+    const at=Math.min(x.data.orderIdx!=null?x.data.orderIdx:cand.order.length,cand.order.length);
+    cand.order.splice(at,0,x.data.id);
+    cand.items[x.data.id]={name:x.data.name,state:normState(JSON.parse(JSON.stringify(x.data.state))),createdAt:x.data.createdAt||new Date().toISOString()};
+    msg='已恢复事项「'+x.data.name+'」';
   }else{
-    const pr=projects.items[x.projId];
-    if(!pr){toast('原事项已不存在，这张卡回不了家了——先留在回收站，恢复事项后再来');}
-    else{
-      let data=x.data;
-      if(pr.state.tasks.some(t=>t.id===data.id)){
-        const nid=newTaskId();
-        remapS5Key(pr.state,data.id,nid);
-        data=Object.assign({},data,{id:nid});
-        toast('同号卡已存在，这张恢复时换了新编号');
-      }
-      pr.state.tasks.push(data);
-      if(persist()){ok=true;toast('已恢复任务卡「'+data.a+'」');}
-      else{pr.state.tasks.pop();toast('⚠️ 存储失败，恢复未完成——记录仍留在回收站');}
+    if(x.projId===cand.current){cand.items[cand.current].state=JSON.parse(JSON.stringify(state));}  /* 当前事项也走副本, 不动活对象 */
+    const pr=cand.items[x.projId];
+    if(!pr){toast('原事项已不存在，这张卡回不了家了——先留在回收站，恢复事项后再来');return;}
+    const data=JSON.parse(JSON.stringify(x.data));
+    if(pr.state.tasks.some(t=>t.id===data.id)){   /* 同号卡: 换新编号, 存量卡的圈选不动 */
+      let nid=newTaskId();
+      while(pr.state.tasks.some(t=>t.id===nid))nid=newTaskId();
+      data.id=nid;
+      msg='同号卡已存在，这张恢复时换了新编号';
     }
+    pr.state.tasks.push(data);
+    if(x.key!=null){   /* 它自己被删时留下的"幸亏", 归它自己, 不移交别人的 */
+      pr.state.goal=pr.state.goal||{};
+      if(typeof pr.state.goal.s5!=='object'||!pr.state.goal.s5)pr.state.goal.s5={};
+      if(typeof pr.state.goal.s5.keys!=='object'||!pr.state.goal.s5.keys)pr.state.goal.s5.keys={};
+      pr.state.goal.s5.keys[data.id]=x.key;
+    }
+    msg=(msg?msg+'；':'')+'已恢复任务卡「'+data.a+'」';
   }
-  if(ok){const t=loadTrash();t.splice(o.idx,1);saveTrash(t);}
+  const v=commitProjects(cand);           /* 整套要么落盘要么不动, 没有半截回滚 */
+  if(v===false){toast('⚠️ 存储失败或被拦，恢复未完成——记录仍留在回收站');return;}
+  projects=cand;_ver=v;
+  if(!projects.order.includes(projects.current))projects.current=projects.order[0];
+  state=projects.items[projects.current].state;
+  const t=loadTrash();t.splice(o.idx,1);saveTrash(t);
+  toast(msg);
   refreshProjBar();renderAll();renderTrash();
 }
 function dropTrash(i){
@@ -1138,51 +1182,74 @@ function dropTrash(i){
   const t=loadTrash();t.splice(o.idx,1);saveTrash(t);renderTrash();
 }
 function emptyTrash(){if(!confirm('彻底清空回收站？其中的内容将不可恢复。'))return;saveTrash([]);renderTrash();}
-/* ===== 被拦下修改的备份恢复 ===== */
-function conflictBackup(){try{const r=localStorage.getItem(CKEY);return r?JSON.parse(r):null;}catch(e){return null;}}
+/* ===== 被拦下修改的备份恢复(每页一个槽, 互不覆盖) ===== */
 function renderConflict(){
   const el=document.getElementById('conflictBox');if(!el)return;
-  const c=conflictBackup();
-  if(!c){el.classList.add('hidden');el.innerHTML='';return;}
-  el.classList.remove('hidden');
-  el.innerHTML='<h2>⚠️ 有一页被拦下的修改</h2>'
-    +'<div class="sub" style="margin:0 0 8px">另一个标签页保存了新版本（'+new Date(c.when).toLocaleString()+' 那版被拦住没写进去），备份在这。导出留存，或明确选择覆盖/丢弃。</div>'
-    +'<div class="toolbar">'
-    +'<button class="mini" onclick="downloadConflict()">导出这版 JSON</button> '
-    +'<button class="mini" onclick="adoptConflict()">用这版覆盖（另一处的新保存将丢失）</button> '
-    +'<button class="mini" onclick="dropConflict()">丢弃这版</button></div>';
+  let html='';
+  if(_corruptRaw){
+    html+='<h2>⛔ 存档校验未过，原始数据已为你保住</h2>'
+      +'<div class="sub" style="margin:0 0 8px">当前存档结构校验不通过。为避免用空白档覆盖你的数据，本页已停止自动写入，原始内容原封未动。</div>'
+      +'<div class="toolbar"><button class="mini" onclick="downloadCorrupt()">导出原始档留底</button> '
+      +'<button class="mini" onclick="discardCorrupt()">放弃原始档，以空白重新开始</button></div>';
+  }
+  listConflicts().forEach(k=>{
+    const c=readConflict(k);if(!c||!c.projects)return;
+    const d=new Date(c.when||Date.now());
+    html+='<h2 style="margin-top:14px">⚠️ 有一页被拦下的修改</h2>'
+      +'<div class="sub" style="margin:0 0 8px">'+d.toLocaleString()+' 那版被拦住没写进去（页签 '+(c.tab||'?')+'），备份在这。导出留存，或明确选择覆盖/丢弃。</div>'
+      +'<div class="toolbar">'
+      +'<button class="mini" onclick="downloadConflict(\''+k+'\')">导出这版 JSON</button> '
+      +'<button class="mini" onclick="adoptConflict(\''+k+'\')">用这版覆盖（另一处的新保存将丢失）</button> '
+      +'<button class="mini" onclick="dropConflict(\''+k+'\')">丢弃这版</button></div>';
+  });
+  if(!html){el.classList.add('hidden');el.innerHTML='';return;}
+  el.classList.remove('hidden');el.innerHTML=html;
 }
-function downloadConflict(){
-  const c=conflictBackup();if(!c)return;
+function downloadCorrupt(){
+  if(!_corruptRaw)return;
+  const blob=new Blob([_corruptRaw],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='工序台_待修复原始档.json';a.click();
+}
+function discardCorrupt(){
+  if(!confirm('放弃原始损坏档？它将不可恢复，并以空白工作区重新开始。'))return;
+  try{localStorage.removeItem(PKEY);}catch(e){}
+  _corruptRaw=null;_stale=false;
+  const id='p'+Date.now().toString(36);
+  projects={order:[id],current:id,items:{[id]:{name:'我的第一件事',state:blankState(),createdAt:new Date().toISOString()}}};
+  state=projects.items[id].state;cur=null;
+  persist();refreshProjBar();renderAll();renderTrash();toast('已以空白工作区重新开始');
+}
+function downloadConflict(k){
+  const c=readConflict(k);if(!c)return;
   const blob=new Blob([JSON.stringify({v:2,exportedAt:new Date().toISOString(),projects:c.projects},null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='工序台_被拦下的版本.json';a.click();
 }
-function adoptConflict(){
-  const c=conflictBackup();if(!c)return;
+function adoptConflict(k){
+  const c=readConflict(k);if(!c){toast('这版备份不存在了');return;}
   if(!validProjects(c.projects)){toast('这版备份结构已损坏，不敢覆盖');return;}
   if(!confirm('用被拦下的这版覆盖当前存档？另一个标签页保存的更新将丢失。'))return;
-  projects=c.projects;
-  if(!projects.order.includes(projects.current))projects.current=projects.order[0];
+  let cand;try{cand=JSON.parse(JSON.stringify(c.projects));}catch(e){toast('准备覆盖副本失败');return;}
+  for(const id of cand.order)normState(cand.items[id].state);
+  if(!cand.order.includes(cand.current))cand.current=cand.order[0];
+  const v=commitProjects(cand);   /* 先落盘候选, 成功才换活动状态 */
+  if(v===false){toast('覆盖失败，什么都没动——这版备份仍保留，可重试');return;}
+  projects=cand;_ver=v;_stale=false;bumpIdFloor(projects);
   state=projects.items[projects.current].state;cur=null;
   document.getElementById('bench').classList.add('hidden');
-  _stale=false;
-  try{
-    const sv=readStoredVer();
-    projects.ver=(sv!==null?sv:0)+1;_ver=projects.ver;
-    localStorage.setItem(PKEY,JSON.stringify(projects));
-  }catch(e){toast('覆盖失败，什么都没动');return;}
-  try{localStorage.removeItem(CKEY);}catch(e){}
+  try{localStorage.removeItem(k);}catch(e){}
   refreshProjBar();renderAll();renderTrash();toast('已用备份版本覆盖当前存档');
 }
-function dropConflict(){
-  if(!confirm('丢弃被拦下的这版修改？它将不可恢复。'))return;
-  try{localStorage.removeItem(CKEY);}catch(e){}
+function dropConflict(k){
+  if(!confirm('丢弃这版被拦下的修改？它将不可恢复。'))return;
+  try{localStorage.removeItem(k);}catch(e){}
   renderConflict();
 }
 function delTask(id){
   const t=state.tasks.find(x=>x.id===id);if(!t)return;
-  if(!trashPut({type:'task',when:Date.now(),projId:projects.current,projName:projects.items[projects.current].name,data:t})){toast('⚠️ 回收站写入失败，为防丢数据没有删除——请导出 JSON 备份后再试');return;}
-  const g=state.goal&&state.goal.s5;if(g&&g.keys)delete g.keys[id];   /* 来路地图不再留它的圈 */
+  const g=state.goal&&state.goal.s5;
+  const savedKey=(g&&g.keys&&g.keys[id]!==undefined)?g.keys[id]:null;   /* 圈选是它的, 删卡时随卡走, 恢复时归它自己 */
+  if(!trashPut({type:'task',when:Date.now(),projId:projects.current,projName:projects.items[projects.current].name,data:t,key:savedKey})){toast('⚠️ 回收站写入失败，为防丢数据没有删除——请导出 JSON 备份后再试');return;}
+  if(g&&g.keys)delete g.keys[id];   /* 来路地图不再留它的圈 */
   state.tasks=state.tasks.filter(x=>x.id!==id);save();
 }
 
@@ -1257,17 +1324,29 @@ function importJSON(e){
     let s=null;try{s=JSON.parse(r.result);}catch(err){toast('文件不是有效 JSON，未导入');e.target.value='';return;}
     if(s&&s.projects&&validProjects(s.projects)){
       if(!confirm('这是「全部事项」备份（'+s.projects.order.length+'个事项），导入将替换当前所有事项，继续？')){e.target.value='';return;}
-      projects=s.projects;
-      for(const id of projects.order)normState(projects.items[id].state);
-      if(!projects.order.includes(projects.current))projects.current=projects.order[0];
+      let cand;
+      try{cand=JSON.parse(JSON.stringify(s.projects));}catch(err){toast('内存不足，未导入');e.target.value='';return;}
+      for(const id of cand.order)normState(cand.items[id].state);   /* 候选副本先归一化, 成功才提交 */
+      if(!cand.order.includes(cand.current))cand.current=cand.order[0];
+      const v=commitProjects(cand);
+      if(v===false){toast('导入失败：存储不可用或本页已被拦，当前进度未受影响');e.target.value='';return;}
+      projects=cand;_ver=v;bumpIdFloor(projects);
       state=projects.items[projects.current].state;cur=null;
       document.getElementById('bench').classList.add('hidden');
-      persist();refreshProjBar();renderAll();toast('全部事项已导入');
+      refreshProjBar();renderAll();toast('全部事项已导入');
       e.target.value='';return;
     }
     if(validState(s)){
-      if(!s.bp)s.bp={};if(!s.custom)s.custom=[];normState(s);
-      state=s;if(save())toast('进度已导入');
+      normState(s);
+      let cand;
+      try{cand=JSON.parse(JSON.stringify(projects));}catch(err){toast('内存不足，未导入');e.target.value='';return;}
+      cand.items[cand.current].state=s;
+      const v=commitProjects(cand);
+      if(v===false){toast('导入失败：存储不可用或本页已被拦，当前进度未受影响');e.target.value='';return;}
+      projects=cand;_ver=v;
+      state=projects.items[projects.current].state;cur=null;
+      document.getElementById('bench').classList.add('hidden');
+      renderAll();toast('进度已导入');
     }else toast('文件结构不对，未导入（当前进度未受影响）');
     e.target.value='';
   };
