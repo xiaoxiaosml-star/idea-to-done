@@ -267,8 +267,10 @@
       <div class="toolbar">
         <button class="primary" onclick="addRescue()">🫀 生成救援卡</button>
         <button class="ghost" onclick="pickRandomMood()">🎲 派一个</button>
+        <button class="ghost" id="btnNaS4" onclick="toggleNa('s4')">🚫 这关不适用</button>
         <button class="ghost" onclick="closeBench()">收起本关</button>
       </div>
+      <div id="naS4Note" style="display:none;font-size:12.5px;color:var(--muted);margin-top:6px"></div>
     </div>
     <!-- 第五关专属: 做成复盘 = 一句话+关键三步+幸亏+最有效一招 -->
     <div id="benchS5" class="hidden" style="margin-top:12px">
@@ -669,12 +671,13 @@ function deleteProject(){
 }
 function stationMet(s,st){
   st=st||state;
+  if(st.na&&st.na[s.id])return true;                    /* 用户按事实标了"不适用"的关: 不逼编动作 */
   const list=st.tasks.filter(t=>t.st===s.id);
   if(s.id==='s1'){const ps=list.filter(t=>t.pick);
     return list.length>=2&&list.every(t=>t.accept&&t.accept.trim())&&ps.length===1&&!!(ps[0].done&&ps[0].evidence);}
   if(s.id==='s2')return !!(st.goal&&st.goal[s.id]&&st.goal[s.id].trim())&&list.length>0&&list.every(t=>t.ready)&&list.some(t=>t.done&&t.evidence);
   if(s.id==='s3'){const dn=list.filter(t=>t.done);
-    return dn.length>=2&&dn.every(t=>t.evidence&&t.evidence.trim())&&dn.some(t=>t.revise&&t.revise.trim());}
+    return dn.length>=1&&dn.every(t=>t.evidence&&t.evidence.trim())&&dn.some(t=>t.revise&&t.revise.trim());}
   if(s.id==='s4')return list.some(t=>t.done&&t.mood&&t.mood.trim());
   if(s.id==='s5'){const g=(st.goal&&typeof st.goal.s5==='object'&&st.goal.s5)||{};
     const keys=g.keys||{};
@@ -708,11 +711,12 @@ function renderPassCond(){
       +chk(!!(ps.length&&ps[0].done&&ps[0].evidence))+'圈定的做完+证据';
   }else if(cur==='s3'){
     const dn=list.filter(t=>t.done);
-    rows=chk(list.length>=2)+'排了≥2轮（共'+list.length+'轮）　'
-      +chk(dn.length>=2&&dn.every(t=>t.evidence&&t.evidence.trim()))+'每轮做完+留结果　'
-      +chk(dn.some(t=>t.revise&&t.revise.trim()))+'根据结果改过一次';
+    rows=chk(list.length>=1)+'排了≥1轮（共'+list.length+'轮）　'
+      +chk(dn.length>=1&&dn.every(t=>t.evidence&&t.evidence.trim()))+'做完的每轮留结果　'
+      +chk(dn.some(t=>t.revise&&t.revise.trim()))+'根据结果写过调整说明（一轮就做完+留结果+写调整=一次达标，不逼第二轮）';
   }else if(cur==='s4'){
-    rows=chk(list.some(t=>t.mood&&t.mood.trim()))+'情绪写了一句话　'+chk(list.some(t=>t.done))+'完成一个最小动作';
+    if(state.na&&state.na.s4)rows=chk(true)+'已按事实标"不适用"——这关对你不需要情绪处理';
+    else rows=chk(list.some(t=>t.mood&&t.mood.trim()))+'情绪写了一句话　'+chk(list.some(t=>t.done))+'完成一个最小动作';
   }else if(cur==='s5'){
     const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
     const f=k=>g[k]&&g[k].trim();
@@ -1036,6 +1040,7 @@ function openBench(id,m){
   document.getElementById('benchS2').classList.toggle('hidden',!isS2);
   document.getElementById('benchS3').classList.toggle('hidden',!isS3);
   document.getElementById('benchS4').classList.toggle('hidden',!isS4);
+  if(isS4)renderS4Na();
   document.getElementById('benchS5').classList.toggle('hidden',!isS5);
   if(isS2)document.getElementById('s2Goal').value=(state.goal&&state.goal.s2)||'';
   if(isS4){renderMoodMenu();}
@@ -1104,6 +1109,21 @@ function setMode(m,s){
 }
 function closeBench(){cur=null;document.getElementById('bench').classList.add('hidden');renderMap();}
 
+function toggleNa(id){   /* 按事实标"不适用": 稳定推进、从未需要这一环的人不该被逼编心态记录 */
+  state.na=state.na||{};
+  if(state.na[id])delete state.na[id];
+  else state.na[id]=true;
+  save();renderS4Na();renderAll();
+  toast(state.na[id]?'已标"不适用"——这关对你不需要情绪处理，可随时取消':'已取消"不适用"标记');
+}
+function renderS4Na(){
+  const on=!!(state.na&&state.na.s4);
+  const btn=document.getElementById('btnNaS4');if(!btn)return;
+  btn.textContent=on?'✅ 已标不适用（点击取消）':'🚫 这关不适用';
+  const note=document.getElementById('naS4Note');
+  if(on){note.style.display='';note.textContent='已按事实标记：这件事稳定推进，从未需要情绪处理这一环。标记可随时取消，不影响其他关。';}
+  else note.style.display='none';
+}
 function renderBp(){
   const s=allStations().find(x=>x.id===cur);
   const checked=(state.bp[cur]||[]);
