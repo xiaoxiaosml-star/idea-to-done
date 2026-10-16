@@ -170,7 +170,7 @@ function render(){
   }
   if(paid.s==="ok"&&got.s==="ok")lines.push("③ 现金账：实际支付 "+yuan(paid.c)+" - 实际收到 "+yuan(got.c)+" = 现金净流出 <b>"+yuan(paid.c-got.c)+" 元</b>");
   else if(paid.s!=="empty"||got.s!=="empty")lines.push("③ 现金账：实际支付 "+cell("r8")+" / 实际收到 "+cell("r7")+"——未填齐，无法计算");
-  if(inv.s==="ok"&&paid.s==="ok"&&got.s==="ok")lines.push("📦 剩余库存成本价值 "+yuan(inv.c)+" 元——货还在你手里，和上面的现金净流出是两笔并列的账");
+  if(inv.s==="ok")lines.push("📦 剩余库存成本价值 "+yuan(inv.c)+" 元——货还在你手里，和现金净流出是两笔并列的账，互不依赖");
   else if(inv.s==="bad")lines.push("📦 剩余库存：⚠️"+val("r9")+"（无效，未采用）");
   if(rev.s==="ok"&&cogs.s==="ok"&&fee.s==="ok"){
     const profit=rev.c-cogs.c-fee.c;
