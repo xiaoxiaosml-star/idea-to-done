@@ -283,7 +283,7 @@
         <label>🧭 下一步还差什么（一个信息或一个动作，不写"再看看"）</label>
         <input type="text" id="s5_next" placeholder="例：还差早高峰的真实销量——再摆两个工作日早高峰就知道" oninput="saveS5('next',this.value)">
       </div>
-      <label>🗺 来路地图 · 你走过的每一步自动连成线，关键转折从上面圈（⭐ 来路不足3步就全圈，每个配一句"幸亏当时"，不凑数）</label>
+      <label>🗺 来路地图 · 你走过的每一步自动连成线，关键转折从上面圈（⭐ 只从"做完+有证据"的步里圈，不足3步全圈，每个配一句"幸亏当时"，不凑数）</label>
       <div id="s5Map" style="border:1px solid var(--line);border-radius:10px;background:#fff;padding:4px 14px;margin:2px 0 4px;max-height:320px;overflow-y:auto"></div>
       <label>⭐ 最有效的一招（下次遇到别的事直接复用的那个）</label>
       <input type="text" id="s5_best" placeholder="例：先摆一天再说——动作永远比完美计划值钱" oninput="saveS5('best',this.value)">
@@ -365,9 +365,10 @@
     </div>
     <input type="file" id="importFile" accept=".json" class="hidden" onchange="importJSON(event)">
   </div>
+  <div id="conflictBox" class="card hidden"></div>
   <div class="card">
     <h2>🗑 回收站</h2>
-    <div class="sub" style="margin:0 0 8px">误删的事项和任务卡在这躺30天，过期自动消失</div>
+    <div class="sub" style="margin:0 0 8px">误删的事项和任务卡在这躺30天，过期自动消失（最多存最近100条）</div>
     <div id="trashList"></div>
     <div class="toolbar"><button class="ghost" onclick="emptyTrash()">清空回收站</button></div>
   </div>
@@ -410,28 +411,43 @@ const PKEY='gsc_projects';
 let _tidSeq=0;
 function newTaskId(){const n=Date.now();_tidSeq=_tidSeq>=n?_tidSeq+1:n;return _tidSeq;}
 let projects=null;
+let _ver=0;          /* 存档版本号: 多标签页防覆盖的比对基准 */
+let _stale=false;    /* 本页快照已过期(别处于我之后保存过更新), 停止写入等处置 */
 function blankState(){return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};}
 function validProjects(p){
-  if(!p||!Array.isArray(p.order)||!p.items)return false;
+  if(!p||!Array.isArray(p.order)||!p.items||typeof p.items!=='object')return false;
   if(!p.order.length)return false;
-  for(const id of p.order){if(!p.items[id]||typeof p.items[id].name!=='string'||!validState(p.items[id].state))return false;}
+  if(p.ver!==undefined&&typeof p.ver!=='number')return false;
+  const seen=new Set();
+  for(const id of p.order){
+    if(typeof id!=='string'||seen.has(id))return false;seen.add(id);
+    const it=p.items[id];
+    if(!it||typeof it.name!=='string'||!validState(it.state))return false;}
   return true;
 }
 projects=loadProjects();
 if(!projects){
   const legacy=load();                              /* 旧版单一存档 → 第一个事项 */
   const id='p'+Date.now().toString(36);
-  projects={order:[id],current:id,items:{[id]:{name:'我的第一件事',state:legacy,createdAt:new Date().toISOString()}}};
-  try{localStorage.removeItem('gsc_state');}catch(e){}
-  try{localStorage.setItem(PKEY,JSON.stringify(projects));}catch(e){}   /* 迁移即落盘(state尚未声明,不走persist) */
+  projects={order:[id],current:id,ver:1,items:{[id]:{name:'我的第一件事',state:legacy,createdAt:new Date().toISOString()}}};
+  try{
+    localStorage.setItem(PKEY,JSON.stringify(projects));   /* 先写新键 */
+    _ver=1;
+    try{localStorage.removeItem('gsc_state');}catch(e){}   /* 新键落盘成功后才删旧键 */
+  }catch(e){}
 }
 let state=projects.items[projects.current].state;
 let cur=null;
 let mode='know';
 
 function validState(s){
-  if(!s||!Array.isArray(s.tasks))return false;
-  for(const t of s.tasks){if(!t||typeof t!=='object'||typeof t.a!=='string'||typeof t.st!=='string'||typeof t.id!=='number')return false;}
+  if(!s||typeof s!=='object'||!Array.isArray(s.tasks))return false;
+  const ids=new Set();
+  for(const t of s.tasks){
+    if(!t||typeof t!=='object'||typeof t.a!=='string'||typeof t.st!=='string'||typeof t.id!=='number')return false;
+    if(ids.has(t.id))return false;ids.add(t.id);
+    for(const k of ['accept','stop','evidence','revise','expect','mood'])if(t[k]!==undefined&&typeof t[k]!=='string')return false;
+    for(const k of ['ready','done','pick'])if(t[k]!==undefined&&typeof t[k]!=='boolean')return false;}
   if(s.custom!==undefined){
     if(!Array.isArray(s.custom))return false;
     for(const c of s.custom){if(!c||typeof c!=='object'||typeof c.id!=='string'||typeof c.name!=='string'||!Array.isArray(c.bp))return false;
@@ -443,8 +459,25 @@ function validState(s){
       if(!Array.isArray(v))return false;
       for(const i of v){if(typeof i!=='number'||i<0||i%1!==0)return false;}}
   }
+  if(s.goal!==undefined){
+    if(!s.goal||typeof s.goal!=='object'||Array.isArray(s.goal))return false;
+    for(const k of ['s0','s1','s2','s3','s4'])if(s.goal[k]!==undefined&&typeof s.goal[k]!=='string')return false;
+    if(s.goal.s5!==undefined){
+      const g=s.goal.s5;
+      if(!g||typeof g!=='object'||Array.isArray(g))return false;
+      for(const k of ['done','cost','best','next'])if(g[k]!==undefined&&typeof g[k]!=='string')return false;
+      if(g.keys!==undefined){
+        if(!g.keys||typeof g.keys!=='object'||Array.isArray(g.keys))return false;
+        for(const id of Object.keys(g.keys)){if(typeof g.keys[id]!=='string')return false;}}
+    }
+  }
+  if(s.outcome!==undefined&&!['','done','go','stop','explore'].includes(s.outcome))return false;
   return true;
 }
+function normState(s){if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';
+  const g=s.goal.s5;
+  if(g&&g.keys){for(const id of Object.keys(g.keys)){if(!s.tasks.some(t=>t.id===Number(id)))delete g.keys[id];}}
+  return s;}
 function load(){
   try{
     const raw=localStorage.getItem('gsc_state');
@@ -460,18 +493,37 @@ function loadProjects(){
     const raw=localStorage.getItem(PKEY);
     if(!raw)return null;
     const p=JSON.parse(raw);
-    if(validProjects(p)){if(!p.order.includes(p.current))p.current=p.order[0];return p;}
+    if(validProjects(p)){
+      if(!p.order.includes(p.current))p.current=p.order[0];
+      _ver=(typeof p.ver==='number')?p.ver:0;
+      for(const id of p.order)normState(p.items[id].state);
+      return p;}
     return null;
   }catch(e){return null;}
 }
+function readStoredVer(){try{const raw=localStorage.getItem(PKEY);if(!raw)return null;const p=JSON.parse(raw);return (p&&typeof p.ver==='number')?p.ver:null;}catch(e){return null;}}
+function markStale(){
+  const first=!_stale;_stale=true;
+  try{localStorage.setItem(CKEY,JSON.stringify({when:Date.now(),projects}));}catch(e){}   /* 每次都刷新备份: 内存可能又改了 */
+  if(first)toast('⚠️ 另一个标签页已保存了更新，本页已停止自动保存，防止互相覆盖。本页的修改已备份，到「💾 数据」页可导出或选择覆盖');
+}
 function persist(){
   try{
+    const storedVer=readStoredVer();
+    if(storedVer!==null&&storedVer>_ver){markStale();return false;}   /* 过期页禁止写入 */
     projects.items[projects.current].state=state;
     projects.items[projects.current].updatedAt=new Date().toISOString();
+    projects.ver=(storedVer!==null?storedVer:_ver)+1;
+    _ver=projects.ver;
     localStorage.setItem(PKEY,JSON.stringify(projects));
     return true;
   }catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}
 }
+window.addEventListener('storage',ev=>{   /* 别处置于本页之后的保存, 立即把本页标记过期 */
+  if(ev.key!==PKEY)return;
+  const v=readStoredVer();
+  if(v!==null&&v>_ver)markStale();
+});
 function save(){
   const ok=persist();
   renderAll();
@@ -513,8 +565,8 @@ function renameProject(){
 }
 function deleteProject(){
   const it=projects.items[projects.current];
-  if(!confirm('删除事项「'+it.name+'」？会先移入回收站（躺30天，可随时恢复）。'))return;
-  trashPut({type:'project',when:Date.now(),data:{id:projects.current,name:it.name,state:it.state,createdAt:it.createdAt,orderIdx:projects.order.indexOf(projects.current)}});
+  if(!confirm('删除事项「'+it.name+'」？会先移入回收站（躺30天，最多存最近'+TRASH_CAP+'条，可随时恢复）。'))return;
+  if(!trashPut({type:'project',when:Date.now(),data:{id:projects.current,name:it.name,state:it.state,createdAt:it.createdAt,orderIdx:projects.order.indexOf(projects.current)}})){toast('⚠️ 回收站写入失败，为防丢数据没有删除——请导出 JSON 备份后再试');return;}
   projects.order=projects.order.filter(x=>x!==projects.current);
   delete projects.items[projects.current];
   if(!projects.order.length){
@@ -538,9 +590,10 @@ function stationMet(s,st){
   if(s.id==='s4')return list.some(t=>t.done&&t.mood&&t.mood.trim());
   if(s.id==='s5'){const g=(st.goal&&typeof st.goal.s5==='object'&&st.goal.s5)||{};
     const keys=g.keys||{};
-    const ids=Object.keys(keys).filter(id=>st.tasks.some(t=>t.id===Number(id)));
+    const steps=st.tasks.filter(t=>t.done&&t.evidence);              /* 来路=走完且留了证据的步 */
+    const ids=Object.keys(keys).filter(id=>steps.some(t=>t.id===Number(id)));
     const f=k=>g[k]&&g[k].trim();
-    const req=Math.min(3,st.tasks.length);
+    const req=Math.min(3,Math.max(1,steps.length));                  /* 一步终止圈1个, 未执行的计划不算来路 */
     if(!(!!st.outcome&&f('done')&&f('best')&&ids.length>=req&&ids.every(id=>keys[id]&&keys[id].trim())))return false;
     if(st.outcome==='stop')return f('cost')&&/\d/.test(g.cost);
     if(st.outcome==='explore')return f('next');
@@ -576,13 +629,14 @@ function renderPassCond(){
     const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
     const f=k=>g[k]&&g[k].trim();
     const keys=g.keys||{};
-    const ids=Object.keys(keys).filter(id=>state.tasks.some(t=>t.id===Number(id)));
+    const ids=Object.keys(keys).filter(id=>state.tasks.some(t=>t.id===Number(id)&&t.done&&t.evidence));
     const oc=state.outcome;
     const primary=oc==='stop'?'排除了错误选项':(oc==='explore'?'清楚了多少':'做成的一句话');
-    const req=Math.min(3,state.tasks.length);
+    const steps=state.tasks.filter(t=>t.done&&t.evidence);
+    const req=Math.min(3,Math.max(1,steps.length));
     rows=chk(!!oc)+'结局如实选了　'
       +chk(f('done'))+primary+'　'
-      +chk(ids.length>=req)+'关键转折圈了 '+ids.length+'/'+req+' 个（来路共'+state.tasks.length+'步，不足3步不凑数）　'
+      +chk(ids.length>=req)+'关键转折圈了 '+ids.length+'/'+req+' 个（走过'+steps.length+'步，不足3步不凑数）　'
       +chk(ids.length>0&&ids.every(id=>keys[id]&&keys[id].trim()))+'每个关键转折写了"幸亏"　'
       +chk(f('best'))+'最有效一招'
       +(oc==='stop'?'　'+(chk(f('cost')&&/\d/.test(g.cost)))+'代价写了数字':'')
@@ -755,7 +809,11 @@ function renderS5Map(){
 }
 function toggleKey(id){
   const keys=s5Keys();
-  if(keys[id]!==undefined)delete keys[id];else keys[id]='';
+  if(keys[id]===undefined){
+    const t=state.tasks.find(x=>x.id===id);
+    if(!t||!t.done||!t.evidence){toast('关键转折只能从"做完+有证据"的步骤里圈——没走过的步不算来路');return;}
+    keys[id]='';
+  }else delete keys[id];
   if(!persist())toast('⚠️ 存储不可用，请导出备份');
   renderS5Map();renderPassCond();
 }
@@ -1021,17 +1079,20 @@ function saveEv(id,k,v){
     st.textContent=t.evidence?'✅ 这关过了——回「工序」流水线，进下一关':'⚠️ 证据还空着：这关不算过，不盖章';}
   if(persist())toast('已记录');
 }
-function toggleDone(id){const t=state.tasks.find(x=>x.id===id);t.done=!t.done;if(save()&&t.done)toast('✅ 过一关成一关');}
-/* ===== 回收站: 误删恢复, 躺30天 ===== */
+function toggleDone(id){const t=state.tasks.find(x=>x.id===id);t.done=!t.done;if(!t.done){const g=state.goal&&state.goal.s5;if(g&&g.keys)delete g.keys[id];}if(save()&&t.done)toast('✅ 过一关成一关');}
+/* ===== 回收站: 误删恢复, 躺30天(最多存100条) ===== */
 const TKEY='gsc_trash';
+const CKEY='gsc_conflict';   /* 被拦下页面的整包备份 */
+const TRASH_CAP=100;
 function loadTrash(){try{const r=localStorage.getItem(TKEY);const t=r?JSON.parse(r):[];return Array.isArray(t)?t:[];}catch(e){return[];}}
-function saveTrash(t){try{localStorage.setItem(TKEY,JSON.stringify(t.slice(-30)));}catch(e){}}
+function saveTrash(t){try{localStorage.setItem(TKEY,JSON.stringify(t.slice(-TRASH_CAP)));return true;}catch(e){return false;}}
 function trashArr(){return loadTrash().map((x,idx)=>({x,idx})).filter(o=>Date.now()-o.x.when<30*864e5);}
-function trashPut(entry){const t=loadTrash().filter(x=>Date.now()-x.when<30*864e5);t.push(entry);saveTrash(t);}
+function trashPut(entry){const t=loadTrash().filter(x=>Date.now()-x.when<30*864e5);t.push(entry);return saveTrash(t);}
 function renderTrash(){
+  renderConflict();
   const el=document.getElementById('trashList');if(!el)return;
   const arr=trashArr().slice().reverse();
-  if(!arr.length){el.innerHTML='<div class="sub" style="margin:0">空的——删掉的东西会在这躺30天</div>';return;}
+  if(!arr.length){el.innerHTML='<div class="sub" style="margin:0">空的——删掉的东西会在这躺30天（最多存最近'+TRASH_CAP+'条，超了先清最早的）</div>';return;}
   el.innerHTML=arr.map((o,i)=>{
     const x=o.x;
     const label=x.type==='project'?('事项 · '+esc(x.data.name)):('任务卡 · '+esc(x.data.a)+'（'+esc(stName(x.data.st))+' · 来自 '+esc(x.projName)+'）');
@@ -1040,33 +1101,88 @@ function renderTrash(){
       +'<button class="mini" onclick="dropTrash('+i+')">彻底删</button></div>';
   }).join('');
 }
+function remapS5Key(st,oldId,newId){const g=st.goal&&st.goal.s5;if(g&&g.keys&&g.keys[oldId]!==undefined){g.keys[newId]=g.keys[oldId];delete g.keys[oldId];}}
 function restoreTrash(i){
   const arr=trashArr().slice().reverse();const o=arr[i];if(!o)return;
-  const x=o.x;
+  const x=o.x;let ok=false;
   if(x.type==='project'){
     if(projects.order.includes(x.data.id)){toast('该事项已存在，无需恢复');}
     else{
       const at=Math.min(x.data.orderIdx!=null?x.data.orderIdx:projects.order.length,projects.order.length);
       projects.order.splice(at,0,x.data.id);
       projects.items[x.data.id]={name:x.data.name,state:x.data.state,createdAt:x.data.createdAt||new Date().toISOString()};
-      toast('已恢复事项「'+x.data.name+'」');
+      if(persist()){ok=true;toast('已恢复事项「'+x.data.name+'」');}
+      else{projects.order=projects.order.filter(y=>y!==x.data.id);delete projects.items[x.data.id];toast('⚠️ 存储失败，恢复未完成——记录仍留在回收站');}
     }
   }else{
     const pr=projects.items[x.projId];
-    if(!pr){toast('原事项已不存在，这张卡回不了家了');}
-    else{pr.state.tasks.push(x.data);toast('已恢复任务卡「'+x.data.a+'」');}
+    if(!pr){toast('原事项已不存在，这张卡回不了家了——先留在回收站，恢复事项后再来');}
+    else{
+      let data=x.data;
+      if(pr.state.tasks.some(t=>t.id===data.id)){
+        const nid=newTaskId();
+        remapS5Key(pr.state,data.id,nid);
+        data=Object.assign({},data,{id:nid});
+        toast('同号卡已存在，这张恢复时换了新编号');
+      }
+      pr.state.tasks.push(data);
+      if(persist()){ok=true;toast('已恢复任务卡「'+data.a+'」');}
+      else{pr.state.tasks.pop();toast('⚠️ 存储失败，恢复未完成——记录仍留在回收站');}
+    }
   }
-  const t=loadTrash();t.splice(o.idx,1);saveTrash(t);
-  persist();refreshProjBar();renderAll();renderTrash();
+  if(ok){const t=loadTrash();t.splice(o.idx,1);saveTrash(t);}
+  refreshProjBar();renderAll();renderTrash();
 }
 function dropTrash(i){
   const arr=trashArr().slice().reverse();const o=arr[i];if(!o)return;
   const t=loadTrash();t.splice(o.idx,1);saveTrash(t);renderTrash();
 }
 function emptyTrash(){if(!confirm('彻底清空回收站？其中的内容将不可恢复。'))return;saveTrash([]);renderTrash();}
+/* ===== 被拦下修改的备份恢复 ===== */
+function conflictBackup(){try{const r=localStorage.getItem(CKEY);return r?JSON.parse(r):null;}catch(e){return null;}}
+function renderConflict(){
+  const el=document.getElementById('conflictBox');if(!el)return;
+  const c=conflictBackup();
+  if(!c){el.classList.add('hidden');el.innerHTML='';return;}
+  el.classList.remove('hidden');
+  el.innerHTML='<h2>⚠️ 有一页被拦下的修改</h2>'
+    +'<div class="sub" style="margin:0 0 8px">另一个标签页保存了新版本（'+new Date(c.when).toLocaleString()+' 那版被拦住没写进去），备份在这。导出留存，或明确选择覆盖/丢弃。</div>'
+    +'<div class="toolbar">'
+    +'<button class="mini" onclick="downloadConflict()">导出这版 JSON</button> '
+    +'<button class="mini" onclick="adoptConflict()">用这版覆盖（另一处的新保存将丢失）</button> '
+    +'<button class="mini" onclick="dropConflict()">丢弃这版</button></div>';
+}
+function downloadConflict(){
+  const c=conflictBackup();if(!c)return;
+  const blob=new Blob([JSON.stringify({v:2,exportedAt:new Date().toISOString(),projects:c.projects},null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='工序台_被拦下的版本.json';a.click();
+}
+function adoptConflict(){
+  const c=conflictBackup();if(!c)return;
+  if(!validProjects(c.projects)){toast('这版备份结构已损坏，不敢覆盖');return;}
+  if(!confirm('用被拦下的这版覆盖当前存档？另一个标签页保存的更新将丢失。'))return;
+  projects=c.projects;
+  if(!projects.order.includes(projects.current))projects.current=projects.order[0];
+  state=projects.items[projects.current].state;cur=null;
+  document.getElementById('bench').classList.add('hidden');
+  _stale=false;
+  try{
+    const sv=readStoredVer();
+    projects.ver=(sv!==null?sv:0)+1;_ver=projects.ver;
+    localStorage.setItem(PKEY,JSON.stringify(projects));
+  }catch(e){toast('覆盖失败，什么都没动');return;}
+  try{localStorage.removeItem(CKEY);}catch(e){}
+  refreshProjBar();renderAll();renderTrash();toast('已用备份版本覆盖当前存档');
+}
+function dropConflict(){
+  if(!confirm('丢弃被拦下的这版修改？它将不可恢复。'))return;
+  try{localStorage.removeItem(CKEY);}catch(e){}
+  renderConflict();
+}
 function delTask(id){
   const t=state.tasks.find(x=>x.id===id);if(!t)return;
-  trashPut({type:'task',when:Date.now(),projId:projects.current,projName:projects.items[projects.current].name,data:t});
+  if(!trashPut({type:'task',when:Date.now(),projId:projects.current,projName:projects.items[projects.current].name,data:t})){toast('⚠️ 回收站写入失败，为防丢数据没有删除——请导出 JSON 备份后再试');return;}
+  const g=state.goal&&state.goal.s5;if(g&&g.keys)delete g.keys[id];   /* 来路地图不再留它的圈 */
   state.tasks=state.tasks.filter(x=>x.id!==id);save();
 }
 
@@ -1142,6 +1258,7 @@ function importJSON(e){
     if(s&&s.projects&&validProjects(s.projects)){
       if(!confirm('这是「全部事项」备份（'+s.projects.order.length+'个事项），导入将替换当前所有事项，继续？')){e.target.value='';return;}
       projects=s.projects;
+      for(const id of projects.order)normState(projects.items[id].state);
       if(!projects.order.includes(projects.current))projects.current=projects.order[0];
       state=projects.items[projects.current].state;cur=null;
       document.getElementById('bench').classList.add('hidden');
@@ -1149,7 +1266,7 @@ function importJSON(e){
       e.target.value='';return;
     }
     if(validState(s)){
-      if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';
+      if(!s.bp)s.bp={};if(!s.custom)s.custom=[];normState(s);
       state=s;if(save())toast('进度已导入');
     }else toast('文件结构不对，未导入（当前进度未受影响）');
     e.target.value='';
@@ -1178,7 +1295,7 @@ function renderWisdom(){
   const oc={done:0,go:0,stop:0,explore:0,none:0};
   all.forEach(p=>{const k=p.st.outcome||'none';oc[k]=(oc[k]||0)+1;});
   const certN=all.filter(p=>STATIONS.every(s=>stationMet(s,p.st))).length;
-  sec('🏆 战绩一览','四种结局都是正经结局，看分布就知道你是什么类型的成事者',
+  sec('🏆 战绩一览','四种结局都是正经结局——分布只是这段时间的事实记录，不必急着给自己归类',
     row('一共开过的事项',''+all.length)
     +row('🎯 做成了',''+oc.done)+row('🚀 验证成立·继续',''+oc.go)
     +row('🛑 理性终止（排除错误选项）',''+oc.stop)+row('🌫 还在探索',''+oc.explore)
@@ -1186,14 +1303,14 @@ function renderWisdom(){
 
   /* 迭代画像 */
   const rounds=all.flatMap(p=>p.st.tasks.filter(t=>t.st==='s3').map(t=>({...t,from:p.name})));
-  const dn=rounds.filter(t=>t.done);
-  const revised=dn.filter(t=>t.revise&&t.revise.trim()).length;
-  if(rounds.length)sec('🔁 迭代画像','改率＝做完的轮里，有多少轮根据结果调整过——高改率=真迭代，零改率=原地转圈',
+  const dn=rounds.filter(t=>t.done&&t.evidence&&t.evidence.trim());
+  const noted=dn.filter(t=>t.revise&&t.revise.trim()).length;
+  if(rounds.length)sec('🔁 迭代画像','做了几轮、留没留结果、记没记复盘——只摆事实，不评价好坏；"保持不变"也可以是有依据的决定',
     row('平均每件事的轮数',(rounds.length/all.length).toFixed(1)+' 轮')
     +row('做完且留结果的轮',''+dn.length)
-    +row('根据结果改过的比例',dn.length?Math.round(revised/dn.length*100)+'%（'+revised+'/'+dn.length+'）':'—'));
+    +row('其中写了复盘笔记的轮',dn.length?noted+'/'+dn.length:'—'));
 
-  /* 有效动作榜 */
+  /* 试过的方法 */
   const acts={};
   all.forEach(p=>p.st.tasks.forEach(t=>{
     if(t.done&&t.evidence&&STATIONS.some(x=>x.id===t.st)){
@@ -1214,8 +1331,8 @@ function renderWisdom(){
 
   /* 情绪恢复记录 */
   const rescues=all.flatMap(p=>p.st.tasks.filter(t=>t.st==='s4'&&t.mood).map(t=>({...t,from:p.name})));
-  sec('🫀 情绪恢复记录','你崩的时候都是靠什么缓过来的——下次崩，照方抓药',
-    rescues.map(t=>row('<b>'+esc(t.mood)+'</b>'+(t.done?' <span style="color:var(--ok)">✅ 做完了</span>':'')
+  sec('🫀 情绪恢复记录','你崩的时候都是靠什么缓过来的——"没做完"的招效果未知，自己掂量',
+    rescues.map(t=>row('<b>'+esc(t.mood)+'</b>'+(t.done?' <span style="color:var(--ok)">✅ 做完了</span>':' <span style="color:var(--muted)">没做完·效果未知</span>')
       +'<div style="font-size:11.5px;color:var(--muted)">用的招：'+esc(t.a)+'</div>',chip(t.from))).join(''));
 
   /* 最有效一招库 */
