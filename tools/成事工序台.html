@@ -147,7 +147,7 @@
     <button id="navWeek" onclick="goView('week')">📅 本周<span class="bdg" id="navWeekCnt"></span></button>
     <button id="navOutcome" onclick="goView('outcome')">🎯 结局<span class="bdg" id="navOutcomeBdg"></span></button>
     <button id="navWisdom" onclick="goView('wisdom');renderWisdom()">📖 心法</button>
-    <button id="navData" onclick="goView('data')">💾 数据</button>
+    <button id="navData" onclick="goView('data');renderTrash()">💾 数据</button>
   </div>
 
   <!-- ===== 页一 · 工序: 自诊 + 地图 + 工位 ===== -->
@@ -283,7 +283,7 @@
         <label>🧭 下一步还差什么（一个信息或一个动作，不写"再看看"）</label>
         <input type="text" id="s5_next" placeholder="例：还差早高峰的真实销量——再摆两个工作日早高峰就知道" oninput="saveS5('next',this.value)">
       </div>
-      <label>🗺 来路地图 · 你走过的每一步自动连成线，关键转折从上面圈（⭐ 圈≥3个，各配一句"幸亏当时"）</label>
+      <label>🗺 来路地图 · 你走过的每一步自动连成线，关键转折从上面圈（⭐ 来路不足3步就全圈，每个配一句"幸亏当时"，不凑数）</label>
       <div id="s5Map" style="border:1px solid var(--line);border-radius:10px;background:#fff;padding:4px 14px;margin:2px 0 4px;max-height:320px;overflow-y:auto"></div>
       <label>⭐ 最有效的一招（下次遇到别的事直接复用的那个）</label>
       <input type="text" id="s5_best" placeholder="例：先摆一天再说——动作永远比完美计划值钱" oninput="saveS5('best',this.value)">
@@ -364,6 +364,12 @@
       <button class="ghost" onclick="clearAll()">清空重来</button>
     </div>
     <input type="file" id="importFile" accept=".json" class="hidden" onchange="importJSON(event)">
+  </div>
+  <div class="card">
+    <h2>🗑 回收站</h2>
+    <div class="sub" style="margin:0 0 8px">误删的事项和任务卡在这躺30天，过期自动消失</div>
+    <div id="trashList"></div>
+    <div class="toolbar"><button class="ghost" onclick="emptyTrash()">清空回收站</button></div>
   </div>
   </div><!-- /viewData -->
 
@@ -507,7 +513,8 @@ function renameProject(){
 }
 function deleteProject(){
   const it=projects.items[projects.current];
-  if(!confirm('删除事项「'+it.name+'」？其中的任务卡和结局一并删除，不可恢复（可先导出备份）。'))return;
+  if(!confirm('删除事项「'+it.name+'」？会先移入回收站（躺30天，可随时恢复）。'))return;
+  trashPut({type:'project',when:Date.now(),data:{id:projects.current,name:it.name,state:it.state,createdAt:it.createdAt,orderIdx:projects.order.indexOf(projects.current)}});
   projects.order=projects.order.filter(x=>x!==projects.current);
   delete projects.items[projects.current];
   if(!projects.order.length){
@@ -518,7 +525,7 @@ function deleteProject(){
   state=projects.items[projects.current].state;cur=null;
   document.getElementById('bench').classList.add('hidden');
   persist();refreshProjBar();renderAll();goView('flow');
-  toast('已删除，现位于「'+projects.items[projects.current].name+'」');
+  toast('已删除并移入回收站（30天内可恢复），现位于「'+projects.items[projects.current].name+'」');
 }
 function stationMet(s,st){
   st=st||state;
@@ -533,8 +540,9 @@ function stationMet(s,st){
     const keys=g.keys||{};
     const ids=Object.keys(keys).filter(id=>st.tasks.some(t=>t.id===Number(id)));
     const f=k=>g[k]&&g[k].trim();
-    if(!(!!st.outcome&&f('done')&&f('best')&&ids.length>=3&&ids.every(id=>keys[id]&&keys[id].trim())))return false;
-    if(st.outcome==='stop')return f('cost');
+    const req=Math.min(3,st.tasks.length);
+    if(!(!!st.outcome&&f('done')&&f('best')&&ids.length>=req&&ids.every(id=>keys[id]&&keys[id].trim())))return false;
+    if(st.outcome==='stop')return f('cost')&&/\d/.test(g.cost);
     if(st.outcome==='explore')return f('next');
     return true;}
   return list.some(t=>t.done&&t.evidence);
@@ -571,12 +579,13 @@ function renderPassCond(){
     const ids=Object.keys(keys).filter(id=>state.tasks.some(t=>t.id===Number(id)));
     const oc=state.outcome;
     const primary=oc==='stop'?'排除了错误选项':(oc==='explore'?'清楚了多少':'做成的一句话');
+    const req=Math.min(3,state.tasks.length);
     rows=chk(!!oc)+'结局如实选了　'
       +chk(f('done'))+primary+'　'
-      +chk(ids.length>=3)+'来路地图圈了≥3个关键转折（已圈'+ids.length+'个）　'
+      +chk(ids.length>=req)+'关键转折圈了 '+ids.length+'/'+req+' 个（来路共'+state.tasks.length+'步，不足3步不凑数）　'
       +chk(ids.length>0&&ids.every(id=>keys[id]&&keys[id].trim()))+'每个关键转折写了"幸亏"　'
       +chk(f('best'))+'最有效一招'
-      +(oc==='stop'?'　'+chk(f('cost'))+'代价写了数字':'')
+      +(oc==='stop'?'　'+(chk(f('cost')&&/\d/.test(g.cost)))+'代价写了数字':'')
       +(oc==='explore'?'　'+chk(f('next'))+'下一步差什么':'');
   }else{
     rows=chk(list.some(t=>t.done))+'至少一张卡完成　'+chk(list.some(t=>t.done&&t.evidence))+'写下证据';
@@ -780,7 +789,7 @@ function renderOldTricks(){
   items.sort((x,y)=>x.rank-y.rank);
   const seen=new Set(),top=[];
   for(const it of items){if(seen.has(it.a))continue;seen.add(it.a);top.push(it);if(top.length>=3)break;}
-  let html='<div style="font-size:13px;color:var(--wood);font-weight:600;margin-bottom:2px">📜 你的旧招 · 别的事项里真用过、真有效的（不是建议，是你的存档）</div>';
+  let html='<div style="font-size:13px;color:var(--wood);font-weight:600;margin-bottom:2px">📜 你的旧招 · 别的事项里真试过、留了结果的（值不值得再用，你判断）</div>';
   top.forEach((it,i)=>{
     const note=it.kind==='rescue'?('当时情绪：'+it.mood):('结果：'+it.ev);
     html+='<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--line)">'
@@ -1013,7 +1022,53 @@ function saveEv(id,k,v){
   if(persist())toast('已记录');
 }
 function toggleDone(id){const t=state.tasks.find(x=>x.id===id);t.done=!t.done;if(save()&&t.done)toast('✅ 过一关成一关');}
-function delTask(id){state.tasks=state.tasks.filter(x=>x.id!==id);save();}
+/* ===== 回收站: 误删恢复, 躺30天 ===== */
+const TKEY='gsc_trash';
+function loadTrash(){try{const r=localStorage.getItem(TKEY);const t=r?JSON.parse(r):[];return Array.isArray(t)?t:[];}catch(e){return[];}}
+function saveTrash(t){try{localStorage.setItem(TKEY,JSON.stringify(t.slice(-30)));}catch(e){}}
+function trashArr(){return loadTrash().map((x,idx)=>({x,idx})).filter(o=>Date.now()-o.x.when<30*864e5);}
+function trashPut(entry){const t=loadTrash().filter(x=>Date.now()-x.when<30*864e5);t.push(entry);saveTrash(t);}
+function renderTrash(){
+  const el=document.getElementById('trashList');if(!el)return;
+  const arr=trashArr().slice().reverse();
+  if(!arr.length){el.innerHTML='<div class="sub" style="margin:0">空的——删掉的东西会在这躺30天</div>';return;}
+  el.innerHTML=arr.map((o,i)=>{
+    const x=o.x;
+    const label=x.type==='project'?('事项 · '+esc(x.data.name)):('任务卡 · '+esc(x.data.a)+'（'+esc(stName(x.data.st))+' · 来自 '+esc(x.projName)+'）');
+    return '<div class="pool item"><span class="sp">'+label+' <span style="color:var(--muted);font-size:11px">'+new Date(x.when).toLocaleDateString()+'删</span></span>'
+      +'<button class="mini" onclick="restoreTrash('+i+')">恢复</button>'
+      +'<button class="mini" onclick="dropTrash('+i+')">彻底删</button></div>';
+  }).join('');
+}
+function restoreTrash(i){
+  const arr=trashArr().slice().reverse();const o=arr[i];if(!o)return;
+  const x=o.x;
+  if(x.type==='project'){
+    if(projects.order.includes(x.data.id)){toast('该事项已存在，无需恢复');}
+    else{
+      const at=Math.min(x.data.orderIdx!=null?x.data.orderIdx:projects.order.length,projects.order.length);
+      projects.order.splice(at,0,x.data.id);
+      projects.items[x.data.id]={name:x.data.name,state:x.data.state,createdAt:x.data.createdAt||new Date().toISOString()};
+      toast('已恢复事项「'+x.data.name+'」');
+    }
+  }else{
+    const pr=projects.items[x.projId];
+    if(!pr){toast('原事项已不存在，这张卡回不了家了');}
+    else{pr.state.tasks.push(x.data);toast('已恢复任务卡「'+x.data.a+'」');}
+  }
+  const t=loadTrash();t.splice(o.idx,1);saveTrash(t);
+  persist();refreshProjBar();renderAll();renderTrash();
+}
+function dropTrash(i){
+  const arr=trashArr().slice().reverse();const o=arr[i];if(!o)return;
+  const t=loadTrash();t.splice(o.idx,1);saveTrash(t);renderTrash();
+}
+function emptyTrash(){if(!confirm('彻底清空回收站？其中的内容将不可恢复。'))return;saveTrash([]);renderTrash();}
+function delTask(id){
+  const t=state.tasks.find(x=>x.id===id);if(!t)return;
+  trashPut({type:'task',when:Date.now(),projId:projects.current,projName:projects.items[projects.current].name,data:t});
+  state.tasks=state.tasks.filter(x=>x.id!==id);save();
+}
 
 /* ===== 页面切换 ===== */
 const VIEWS={flow:'viewFlow',week:'viewWeek',outcome:'viewOutcome',wisdom:'viewWisdom',data:'viewData'};
@@ -1146,9 +1201,9 @@ function renderWisdom(){
       acts[t.a].n++;acts[t.a].ev=t.evidence;acts[t.a].from=p.name;
     }}));
   const actRows=Object.keys(acts).sort((a,b)=>acts[b].n-acts[a].n).slice(0,8)
-    .map(a=>row('<b>'+esc(a)+'</b>'+(acts[a].n>1?' <span class="src">×'+acts[a].n+'</span>':'')
+    .map(a=>row('<b>'+esc(a)+'</b>'+(acts[a].n>1?' <span class="src">试过'+acts[a].n+'次</span>':'')
       +'<div style="font-size:11.5px;color:var(--muted)">最近结果：'+esc(acts[a].ev)+'</div>',chip(acts[a].from))).join('');
-  sec('🎯 有效动作榜','出现两次以上的，就是你的祖传招——下次不知道干嘛，先从这里挑',actRows);
+  sec('🧪 试过的方法','"做完+有证据"只证明真的试过，不证明有效；重复只说明试过多次——值不值得再用，你自己判断',actRows);
 
   /* 关键转折库 */
   let turns='';
