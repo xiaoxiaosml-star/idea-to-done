@@ -272,9 +272,17 @@
     </div>
     <!-- 第五关专属: 做成复盘 = 一句话+关键三步+幸亏+最有效一招 -->
     <div id="benchS5" class="hidden" style="margin-top:12px">
-      <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 写做成的一句话 → ② 回顾关键三步，每步配一句"当时幸亏" → ③ 记下最有效一招，收工</div>
-      <label>🎯 做成的一句话（时间+结果，和当初的目标对一下）</label>
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">① 先到「结局」页如实选结局 → ② 按结局写第一句 → ③ 来路地图圈⭐转折+幸亏 → 收工</div>
+      <label id="l_s5done">🎯 做成的一句话（时间+结果，和当初的目标对一下）</label>
       <input type="text" id="s5_done" placeholder="例：三个月内夜市摆摊月净赚3000，第79天做到了" oninput="saveS5('done',this.value)">
+      <div id="wrapCost" style="display:none">
+        <label>💸 这个错误选项的代价（花的钱/时间，写数字，不写"有点贵"）</label>
+        <input type="text" id="s5_cost" placeholder="例：投入2170元 + 三个周末，买回一个真实答案" oninput="saveS5('cost',this.value)">
+      </div>
+      <div id="wrapNext" style="display:none">
+        <label>🧭 下一步还差什么（一个信息或一个动作，不写"再看看"）</label>
+        <input type="text" id="s5_next" placeholder="例：还差早高峰的真实销量——再摆两个工作日早高峰就知道" oninput="saveS5('next',this.value)">
+      </div>
       <label>🗺 来路地图 · 你走过的每一步自动连成线，关键转折从上面圈（⭐ 圈≥3个，各配一句"幸亏当时"）</label>
       <div id="s5Map" style="border:1px solid var(--line);border-radius:10px;background:#fff;padding:4px 14px;margin:2px 0 4px;max-height:320px;overflow-y:auto"></div>
       <label>⭐ 最有效的一招（下次遇到别的事直接复用的那个）</label>
@@ -524,7 +532,11 @@ function stationMet(s,st){
   if(s.id==='s5'){const g=(st.goal&&typeof st.goal.s5==='object'&&st.goal.s5)||{};
     const keys=g.keys||{};
     const ids=Object.keys(keys).filter(id=>st.tasks.some(t=>t.id===Number(id)));
-    return !!st.outcome&&!!(g.done&&g.done.trim())&&!!(g.best&&g.best.trim())&&ids.length>=3&&ids.every(id=>keys[id]&&keys[id].trim());}
+    const f=k=>g[k]&&g[k].trim();
+    if(!(!!st.outcome&&f('done')&&f('best')&&ids.length>=3&&ids.every(id=>keys[id]&&keys[id].trim())))return false;
+    if(st.outcome==='stop')return f('cost');
+    if(st.outcome==='explore')return f('next');
+    return true;}
   return list.some(t=>t.done&&t.evidence);
 }
 function renderPassCond(){
@@ -557,11 +569,15 @@ function renderPassCond(){
     const f=k=>g[k]&&g[k].trim();
     const keys=g.keys||{};
     const ids=Object.keys(keys).filter(id=>state.tasks.some(t=>t.id===Number(id)));
-    rows=chk(!!state.outcome)+'结局如实选了　'
-      +chk(f('done'))+'做成的一句话　'
+    const oc=state.outcome;
+    const primary=oc==='stop'?'排除了错误选项':(oc==='explore'?'清楚了多少':'做成的一句话');
+    rows=chk(!!oc)+'结局如实选了　'
+      +chk(f('done'))+primary+'　'
       +chk(ids.length>=3)+'来路地图圈了≥3个关键转折（已圈'+ids.length+'个）　'
       +chk(ids.length>0&&ids.every(id=>keys[id]&&keys[id].trim()))+'每个关键转折写了"幸亏"　'
-      +chk(f('best'))+'最有效一招';
+      +chk(f('best'))+'最有效一招'
+      +(oc==='stop'?'　'+chk(f('cost'))+'代价写了数字':'')
+      +(oc==='explore'?'　'+chk(f('next'))+'下一步差什么':'');
   }else{
     rows=chk(list.some(t=>t.done))+'至少一张卡完成　'+chk(list.some(t=>t.done&&t.evidence))+'写下证据';
   }
@@ -676,6 +692,19 @@ function fillRound(){
   document.getElementById('s3A').focus();
 }
 /* ===== 第五关·做成复盘 ===== */
+function updateS5Labels(){
+  const o=state.outcome;
+  const map={
+    done:['🎯 做成的一句话（时间+结果，和当初的目标对一下）','例：三个月内夜市摆摊月净赚3000，第79天做到了'],
+    go:['🚀 验证成立的一句话（哪条假设被证实了）','例：地铁口早高峰需求真实，工作日能卖25杯以上'],
+    stop:['🛑 排除了哪个错误选项（一句话）','例：夜市周五晚这条路不成立——人流是看完就走不停留'],
+    explore:['🌫 比一开始清楚了多少（一句对比）','例：从"想摆摊"到知道"位置比品类更决定生死"']};
+  const m=map[o]||map.done;
+  const l=document.getElementById('l_s5done');if(l)l.textContent=m[0];
+  const i=document.getElementById('s5_done');if(i)i.placeholder=m[1];
+  const wc=document.getElementById('wrapCost');if(wc)wc.style.display=o==='stop'?'':'none';
+  const wn=document.getElementById('wrapNext');if(wn)wn.style.display=o==='explore'?'':'none';
+}
 function saveS5(k,v){
   if(!state.goal)state.goal={};
   if(typeof state.goal.s5!=='object'||!state.goal.s5)state.goal.s5={};
@@ -856,7 +885,8 @@ function openBench(id,m){
   if(isS2)document.getElementById('s2Goal').value=(state.goal&&state.goal.s2)||'';
   if(isS4){renderMoodMenu();}
   if(isS5){const g=(state.goal&&typeof state.goal.s5==='object'&&state.goal.s5)||{};
-    ['done','best'].forEach(k=>{const el=document.getElementById('s5_'+k);if(el)el.value=g[k]||'';});
+    ['done','best','cost','next'].forEach(k=>{const el=document.getElementById('s5_'+k);if(el)el.value=g[k]||'';});
+    updateS5Labels();
     renderS5Map();}
   renderPassCond();renderOldTricks();
   document.getElementById('bench').scrollIntoView({behavior:'smooth',block:'start'});
@@ -1154,6 +1184,7 @@ function setOutcome(v){
   const oc={done:'目标达成',go:'验证成立·继续',stop:'理性终止',explore:'探索中'};
   document.getElementById('certOutcome').textContent='当前结局：'+(oc[v]||'未填写');
   renderPassCond();renderMap();
+  if(cur==='s5')updateS5Labels();
   persist();
 }
 function restoreOutcome(){
