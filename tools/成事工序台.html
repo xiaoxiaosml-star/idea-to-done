@@ -349,7 +349,7 @@
   <div id="viewData" class="hidden">
   <div class="card">
     <h2>💾 数据与备份</h2>
-    <div class="sub" style="margin:0 0 10px">所有数据只存在你自己的浏览器里，没有任何上传；换电脑、清浏览器之前，记得先导出 JSON 存档</div>
+    <div class="sub" style="margin:0 0 10px">所有数据只存在你自己的浏览器里，没有任何上传；导出=全部事项打一个包，换电脑/清浏览器后导入即可整体还原</div>
     <div class="toolbar">
       <button class="ghost" onclick="downloadJSON()">导出进度（JSON）</button>
       <button class="ghost" onclick="document.getElementById('importFile').click()">导入进度</button>
@@ -393,6 +393,8 @@ const STATIONS=[
 ];
 
 const PKEY='gsc_projects';
+let _tidSeq=0;
+function newTaskId(){const n=Date.now();_tidSeq=_tidSeq>=n?_tidSeq+1:n;return _tidSeq;}
 let projects=null;
 function blankState(){return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};}
 function validProjects(p){
@@ -610,7 +612,7 @@ function addRescue(){
   const note=document.getElementById('moodNote').value.trim();
   if(!note){toast('先把情绪写成一句话');return;}
   if(!selMood){toast('选一个最小动作，或点"派一个"');return;}
-  state.tasks.push({id:Date.now(),st:cur,a:selMood,mood:note,accept:'做完了',stop:'',slot:'none',done:false});
+  state.tasks.push({id:newTaskId(),st:cur,a:selMood,mood:note,accept:'做完了',stop:'',slot:'none',done:false});
   document.getElementById('moodNote').value='';selMood='';renderMoodMenu();
   if(save()){toast('🫀 救援卡已生成，去「本周」或直接回来打勾');goView('week');}
 }
@@ -623,7 +625,7 @@ function saveGoal(v){
 function addStep(){
   const a=document.getElementById('s2A').value.trim(),c=document.getElementById('s2C').value.trim();
   if(!a){toast('先写这一步做什么');return;}
-  state.tasks.push({id:Date.now(),st:'s2',a,accept:c,stop:'',slot:'none',done:false,ready:true});
+  state.tasks.push({id:newTaskId(),st:'s2',a,accept:c,stop:'',slot:'none',done:false,ready:true});
   document.getElementById('s2A').value='';document.getElementById('s2C').value='';
   save();toast('＋一步　记得问自己：明天能开干吗？');
 }
@@ -642,7 +644,7 @@ function addDir(){
   const a=document.getElementById('s1A').value.trim(),c=document.getElementById('s1C').value.trim();
   if(!a){toast('先写这个方向做什么');return;}
   if(!c){toast('每个方向都要写一句代价——不写代价的选择是赌博');return;}
-  state.tasks.push({id:Date.now(),st:'s1',a,accept:c,stop:'',slot:'none',done:false,pick:false});
+  state.tasks.push({id:newTaskId(),st:'s1',a,accept:c,stop:'',slot:'none',done:false,pick:false});
   document.getElementById('s1A').value='';document.getElementById('s1C').value='';
   save();toast('＋一个方向　写完代价才能比');
 }
@@ -653,16 +655,18 @@ function fillDir(){
 }
 function pickDir(id){
   const t=state.tasks.find(x=>x.id===id);if(!t)return;
-  state.tasks.filter(x=>x.st==='s1').forEach(x=>{x.pick=(x.id===id);});
+  const unpick=t.pick;
+  state.tasks.filter(x=>x.st==='s1').forEach(x=>{x.pick=false;});
+  if(!unpick)t.pick=true;
   save();
-  toast('🏆 圈定了「'+t.a+'」——其余自动变备选，不算浪费');
+  toast(unpick?'已取消圈定':'🏆 圈定了「'+t.a+'」——其余自动变备选，不算浪费');
 }
 /* ===== 第三关·动手迭代 ===== */
 function addRound(){
   const a=document.getElementById('s3A').value.trim(),e=document.getElementById('s3E').value.trim();
   if(!a){toast('先写这一轮做什么');return;}
   const n=state.tasks.filter(t=>t.st==='s3').length+1;
-  state.tasks.push({id:Date.now(),st:'s3',a,expect:e,accept:e,round:n,stop:'',slot:'none',done:false});
+  state.tasks.push({id:newTaskId(),st:'s3',a,expect:e,accept:e,round:n,stop:'',slot:'none',done:false});
   document.getElementById('s3A').value='';document.getElementById('s3E').value='';
   save();toast('＋第'+n+'轮　做完记得：结果不管好坏都回收');
 }
@@ -800,7 +804,7 @@ function renderMap(){
     if(stationMet(s))passed++;
     const d=document.createElement('div');
     d.className='node'+(cur===s.id?' on':'')+(stationMet(s)?' passed':'');
-    d.innerHTML=`<div class="box"><span class="stamp">已确认</span><div class="em">${esc(s.em||'📌')}</div><div class="no">${esc(s.no)}</div><div class="nm">${esc(s.name)}</div><div class="sy">${esc(s.sy||'')}</div><div class="pg">${doneAll}/${tasks.length} 卡${doneAll>done?' · 缺证据':''}</div></div>`;
+    d.innerHTML=`<div class="box"><span class="stamp">已确认</span><div class="em">${esc(s.em||'📌')}</div><div class="no">${esc(s.no)}</div><div class="nm">${esc(s.name)}</div><div class="sy">${esc(s.sy||'')}</div><div class="pg">${doneAll}/${tasks.length} 卡${doneAll>done&&!stationMet(s)?' · 缺证据':''}</div></div>`;
     d.onclick=()=>openBench(s.id);
     el.appendChild(d);
     if(i<sts.length-1){const c=document.createElement('div');c.className='conn';c.textContent='→';el.appendChild(c);}
@@ -938,7 +942,7 @@ function toggleBp(i){
 function addTask(){
   const a=document.getElementById('fAction').value.trim();
   if(!a){toast('先写"要做的动作"');return;}
-  state.tasks.push({id:Date.now(),st:cur,a,
+  state.tasks.push({id:newTaskId(),st:cur,a,
     accept:document.getElementById('fAccept').value.trim(),
     stop:document.getElementById('fStop').value.trim(),
     slot:'none',done:false,recon:mode==='recon'});
@@ -1041,15 +1045,24 @@ function addStation(){
 
 /* ===== 导入导出 ===== */
 function downloadJSON(){
-  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify({v:2,exportedAt:new Date().toISOString(),projects},null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-  a.download='成事工序台_进度.json';a.click();toast('已导出');
+  a.download='成事工序台_全部事项.json';a.click();toast('已导出全部事项');
 }
 function importJSON(e){
   const f=e.target.files[0];if(!f)return;
   const r=new FileReader();
   r.onload=()=>{
     let s=null;try{s=JSON.parse(r.result);}catch(err){toast('文件不是有效 JSON，未导入');e.target.value='';return;}
+    if(s&&s.projects&&validProjects(s.projects)){
+      if(!confirm('这是「全部事项」备份（'+s.projects.order.length+'个事项），导入将替换当前所有事项，继续？')){e.target.value='';return;}
+      projects=s.projects;
+      if(!projects.order.includes(projects.current))projects.current=projects.order[0];
+      state=projects.items[projects.current].state;cur=null;
+      document.getElementById('bench').classList.add('hidden');
+      persist();refreshProjBar();renderAll();toast('全部事项已导入');
+      e.target.value='';return;
+    }
     if(validState(s)){
       if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';
       state=s;if(save())toast('进度已导入');
@@ -1153,7 +1166,7 @@ function closeGuide(){document.getElementById('guideMask').style.display='none';
 refreshProjBar();
 if(localStorage.getItem('gsc_seen'))document.getElementById('guideMask').style.display='none';
 
-function renderAll(){renderMap();if(cur){renderBp();renderTasks();renderPassCond();}renderWeek();restoreOutcome();}
+function renderAll(){renderMap();if(cur){renderBp();renderTasks();renderPassCond();renderOldTricks();}renderWeek();restoreOutcome();}
 renderAll();
 </script>
 </body>
