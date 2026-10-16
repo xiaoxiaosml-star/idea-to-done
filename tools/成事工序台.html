@@ -414,6 +414,7 @@ let projects=null;
 let _ver=0;          /* 存档版本号: 降级模式(无锁API)下拦顺序过期写入的基准 */
 let _stale=false;    /* 本页快照已过期/只读, 停止写入等处置 */
 let _corruptRaw=null;/* 存档校验未过时的原始内容: 绝不能用空白档覆盖它 */
+let _corruptKey=null;/* 原文所在键(gsc_projects 或旧档 gsc_state): 新鲜度校验与弃置都按它走 */
 let _lockFault=false;/* 锁API存在但申请失败 */
 let _baseSnap=null;  /* 最近一次成功落盘的正式档快照: 判断本页有没有"未保存的新改动" */
 let _pendingMigration=false;   /* 检测到旧档: 定盘推迟到确认写者身份后 */
@@ -429,7 +430,6 @@ if(LOCKOK){
   }).catch(()=>{_writer=false;_lockFault=true;markStale();});             /* 申请失败 ≠ 可写: 保留只读故障态 */
 }else{
   _writer=true;                                                          /* 无锁API: 明确降级, 单页使用无并发互斥保证 */
-  initWriteDuties();
   setTimeout(()=>toast('⚠️ 当前浏览器不支持多标签页写锁：请只在一个标签页使用本工具，否则两个页面可能互相覆盖'),900);
 }
 function blankState(){return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};}
@@ -452,13 +452,21 @@ if(!projects){
     projects={order:[id],current:id,ver:0,items:{[id]:{name:'临时工作区（原存档待修复）',state:blankState(),createdAt:new Date().toISOString()}}};
     _ver=0;
   }else{
-    const legacy=load();                              /* 旧版单一存档 → 第一个事项(先只读进来) */
-    let hasLegacy=false;try{hasLegacy=localStorage.getItem('gsc_state')!==null;}catch(e){}
-    const id='p'+Date.now().toString(36);
-    projects={order:[id],current:id,ver:1,items:{[id]:{name:'我的第一件事',state:legacy,createdAt:new Date().toISOString()}}};
-    if(hasLegacy)_pendingMigration=true;else _pendingInit=true;   /* 定盘推迟到 initWriteDuties 确认写者身份后 */
+    const legacy=load();                              /* 旧版单一存档 → 第一个事项(先只读进来; 校验不过会置_corruptRaw并返回null) */
+    if(_corruptRaw){
+      /* 旧档损坏: 与正式档损坏同一待遇——只开临时工作区+明确处置, 绝不自行删旧键, 也不建"我的第一件事"空白定盘 */
+      const id='p'+Date.now().toString(36);
+      projects={order:[id],current:id,ver:0,items:{[id]:{name:'临时工作区（原存档待修复）',state:blankState(),createdAt:new Date().toISOString()}}};
+      _ver=0;
+    }else{
+      let hasLegacy=false;try{hasLegacy=localStorage.getItem('gsc_state')!==null;}catch(e){}
+      const id='p'+Date.now().toString(36);
+      projects={order:[id],current:id,ver:1,items:{[id]:{name:'我的第一件事',state:legacy,createdAt:new Date().toISOString()}}};
+      if(hasLegacy)_pendingMigration=true;else _pendingInit=true;   /* 定盘推迟到 initWriteDuties 确认写者身份后 */
+    }
   }
 }
+if(!LOCKOK)initWriteDuties();   /* 降级模式: 项目与迁移标记就绪后再定盘(锁模式由获锁回调触发, 天然在加载之后) */
 let state=projects.items[projects.current].state;
 let cur=null;
 let mode='know';
@@ -507,9 +515,9 @@ function load(){
     if(!raw)return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};
     const s=JSON.parse(raw);
     if(validState(s)){if(!s.bp)s.bp={};if(!s.custom)s.custom=[];if(!s.goal)s.goal={};if(s.outcome===undefined)s.outcome='';return s;}
-    localStorage.removeItem('gsc_state');
-  }catch(e){localStorage.removeItem('gsc_state');}
-  return {tasks:[],custom:[],bp:{},outcome:'',goal:{}};
+    _corruptRaw=raw;_corruptKey='gsc_state';   /* 旧档校验未过: 保住原文走明确处置, 绝不自行删旧键 */
+  }catch(e){try{_corruptRaw=localStorage.getItem('gsc_state');_corruptKey='gsc_state';}catch(e2){}}
+  return null;
 }
 function bumpIdFloor(p){try{let m=0;for(const id of p.order){const it=p.items[id];if(!it||!it.state)continue;for(const t of it.state.tasks){if(typeof t.id==='number'&&t.id>m)m=t.id;}}if(m>_tidSeq)_tidSeq=m;}catch(e){}}
 function loadProjects(){
@@ -524,9 +532,9 @@ function loadProjects(){
       bumpIdFloor(p);
       _baseSnap=JSON.stringify(p);         /* 归一化之后的快照才是"无改动"基线(此时 projects 尚未赋值, 不能走 syncBase) */
       return p;}
-    _corruptRaw=raw;   /* 校验未过: 保留原始内容, 返回null但绝不做迁移覆盖 */
+    _corruptRaw=raw;_corruptKey=PKEY;   /* 校验未过: 保留原始内容, 返回null但绝不做迁移覆盖 */
     return null;
-  }catch(e){try{_corruptRaw=localStorage.getItem(PKEY);}catch(e2){}return null;}
+  }catch(e){try{_corruptRaw=localStorage.getItem(PKEY);_corruptKey=PKEY;}catch(e2){}return null;}
 }
 function readStoredVer(){try{const raw=localStorage.getItem(PKEY);if(!raw)return null;const p=JSON.parse(raw);return (p&&typeof p.ver==='number')?p.ver:null;}catch(e){return null;}}
 function conflictKey(){return CKEY+'_'+_docId;}
@@ -568,12 +576,22 @@ function markStale(){
 }
 /* 所有共享写入的唯一纪律: 只有持锁写者(true)能写; 判定中(null)/只读(false)/锁故障 一律拒。
    覆盖正式档/回收站/坏档弃置/初始化都必须过这道闸(回收站等另有自己的守卫)。 */
-function commitProjects(obj,ignoreCorrupt){
+function commitProjects(obj,ignoreCorrupt,replaceRaw){
   if(_corruptRaw&&!ignoreCorrupt){toast('⚠️ 当前存档校验未过，已停止写入以保住原始数据——请到「💾 数据」页导出原始档修复');return false;}
   if(LOCKOK&&_writer!==true){markStale();return false;}
   const storedVer=readStoredVer();
-  if(storedVer!==null&&storedVer>_ver){markStale();return false;}   /* 过期页禁止写入 */
-  obj.ver=(storedVer!==null?storedVer:_ver)+1;
+  if(replaceRaw!==undefined&&replaceRaw!==null){
+    /* 明确确认的坏档替换: 提交时原文仍须等于用户确认的那份, 并按该对象的版本形成新版本
+       (临时工作区 _ver=0 不能把带版本号的同一坏档误判成别人的新存档; 也不全局取消正常过期检查) */
+    let cur=null;try{cur=localStorage.getItem(_corruptKey||PKEY);}catch(e){}
+    if(cur!==replaceRaw)return false;
+    let base=_ver;try{const p=JSON.parse(replaceRaw);if(p&&typeof p.ver==='number')base=p.ver;}catch(e){}
+    if(storedVer!==null&&storedVer>base)base=storedVer;
+    obj.ver=base+1;
+  }else{
+    if(storedVer!==null&&storedVer>_ver){markStale();return false;}   /* 过期页禁止写入 */
+    obj.ver=(storedVer!==null?storedVer:_ver)+1;
+  }
   try{localStorage.setItem(PKEY,JSON.stringify(obj));}
   catch(e){toast('⚠️ 浏览器存储不可用——当前改动只在内存里，请立即导出 JSON 备份');return false;}   /* 失败: 版本不推进 */
   return obj.ver;
@@ -605,13 +623,14 @@ function refreshProjBar(){
 }
 function switchProject(id){
   if(id===projects.current||!projects.items[id])return;
-  persist();
+  if(!LOCKOK||_writer===true)persist();   /* 只读/判定中的页不碰 persist: 它会先改 updatedAt 造成假脏, 凭空造"被拦编辑"副本 */
   projects.current=id;
   state=projects.items[id].state;
   cur=null;
   document.getElementById('bench').classList.add('hidden');
   refreshProjBar();renderAll();goView('flow');
   toast('已切换到「'+projects.items[id].name+'」');
+  if(LOCKOK&&_writer!==true)syncBase();   /* 导航本身不是编辑: 导航完成后同步基线, 真编辑再算脏 */
 }
 function newProject(){
   const name=(prompt('给这件事起个名字（如：摆摊验证 / 转行准备），每个事项有独立的流水线和结局：')||'').trim();
@@ -1248,16 +1267,18 @@ function downloadCorrupt(){
 }
 function discardCorrupt(){
   if(LOCKOK&&_writer!==true){toast('⚠️ 本页为只读，不能弃置存档——请在持有写权限的页面操作');return;}
-  let cur=null;try{cur=localStorage.getItem(PKEY);}catch(e){}
+  const key=_corruptKey||PKEY;
+  let cur=null;try{cur=localStorage.getItem(key);}catch(e){}
   if(cur!==_corruptRaw){toast('⚠️ 存档自打开以来已变化（可能另一页已修复），请刷新后再决定');return;}  /* 新鲜度: 只能弃置自己看到的那份 */
   if(!confirm('放弃原始损坏档？它将不可恢复，并以空白工作区重新开始。'))return;
   const id='p'+Date.now().toString(36);
   const cand={order:[id],current:id,items:{[id]:{name:'我的第一件事',state:blankState(),createdAt:new Date().toISOString()}}};
-  const v=commitProjects(cand,true);   /* 先写新档成功, 才弃旧 */
+  const v=commitProjects(cand,true,_corruptRaw);   /* 明确确认的替换: 持锁+提交时原文未变+按原对象版本递进 */
   if(v===false){toast('重建空白档失败，原始档未动');return;}
+  if(key!==PKEY){try{localStorage.removeItem(key);}catch(e){}}   /* 新档落盘成功后才删旧档键(仅当原文在旧键时) */
   projects=cand;_ver=v;
   state=projects.items[id].state;cur=null;
-  _corruptRaw=null;_stale=false;syncBase();
+  _corruptRaw=null;_corruptKey=null;_stale=false;syncBase();
   refreshProjBar();renderAll();renderTrash();toast('已以空白工作区重新开始');
 }
 function downloadConflict(k){
