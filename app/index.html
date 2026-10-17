@@ -376,11 +376,12 @@ Object.keys(DRAFT_DEFS).forEach(k=>{
   const def=DRAFT_DEFS[k];
   def.fields.forEach(f=>{
     const el=document.getElementById(f);
-    el&&el.addEventListener('input',()=>{if(cur&&curDrafts)curDrafts[k]=readDraftForm(k);});
-    el&&el.addEventListener('change',()=>{if(cur&&curDrafts)curDrafts[k]=readDraftForm(k);});  /* select类控件 */
+    /* 每次输入即持久化(F2复审): 刷新/异常后补写内容仍在该事项草稿里,不留内存-only窗口 */
+    el&&el.addEventListener('input',()=>{if(cur&&curDrafts){curDrafts[k]=readDraftForm(k);saveDrafts();}});
+    el&&el.addEventListener('change',()=>{if(cur&&curDrafts){curDrafts[k]=readDraftForm(k);saveDrafts();}});  /* select类控件 */
   });
   const c=def.check&&document.getElementById(def.check);
-  c&&c.addEventListener('change',()=>{if(cur&&curDrafts)curDrafts[k]=readDraftForm(k);});
+  c&&c.addEventListener('change',()=>{if(cur&&curDrafts){curDrafts[k]=readDraftForm(k);saveDrafts();}});
 });
 
 /* ---- 开始页 ---- */
@@ -828,8 +829,11 @@ async function rebuildSessionAndRetry(pid,retry){
   busy(true);
   try{
     const d=await api('/api/projects/'+pid+'/session/rebuild',{base:cur&&cur.id===pid?curBase:undefined},undefined,{pid});
+    /* 重建返回的A版本显式交给A的重试(F4): 重试不再从当前页面取A的base,
+     * 重建期间切走也不会漏带版本吃400。 */
+    const newBase=d.project.version;
     if(cur&&cur.id===pid){cur=d.project;curBase=cur.version;render();}
-    await retry();
+    await retry(newBase);
   }catch(e){/*已提示*/}
   busy(false);
 }
@@ -841,11 +845,13 @@ async function sendMessage(preset){
   await sendMessageTo(cur.id,t);
 }
 /* 发往指定事项的消息路径: 全程只认传入的 pid,不读全局 cur(B4复审)——
- * 会话重建后重发、切换事项后的晚到响应,都不会把 A 的话记进 B。 */
-async function sendMessageTo(pid,text,_retried){
+ * 会话重建后重发、切换事项后的晚到响应,都不会把 A 的话记进 B。
+ * _raw/_base: 恢复链沿用的"第一次提交快照"与"重建返回的版本"(F2/F4),
+ * 重试成功只清原提交快照,重建后不会把当下表单重新认作已提交那版。 */
+async function sendMessageTo(pid,text,_retried,_raw,_base){
   const el=document.getElementById('wInput');
-  const base=cur&&cur.id===pid?curBase:undefined;
-  const sentRaw=el?el.value:'';
+  const base=_base!==undefined?_base:(cur&&cur.id===pid?curBase:undefined);
+  const sentRaw=_raw!==undefined?_raw:(el?el.value:'');
   busy(true);
   try{
     await api('/api/projects/'+pid+'/messages',{text,base},undefined,{pid});
@@ -853,15 +859,16 @@ async function sendMessageTo(pid,text,_retried){
     /* 响应只属于发起时的事项: 已切走就不替换当前页面/草稿,结果仍存原事项(R02) */
     if(cur&&cur.id===pid){
       cur=d.project;curBase=cur.version;render();
-      /* 成功只清除"已提交那一版": 等待期间补写的内容原样保留(R02/T08) */
+      /* 成功只清除"已提交那一版": 等待期间补写的内容原样保留(R02/T08/F2) */
       const i2=document.getElementById('wInput');
       if(sameAs(i2,sentRaw)){i2.value='';if(curDrafts)curDrafts.discuss={};saveDrafts();}
       else toast('你等待期间补写的内容已保留');
     }
   }catch(e){
-    /* 只有用户本人停留在发起事项并点确认才重试; 重试仍发往原 pid;
+    /* 只有用户本人停留在发起事项并点确认才重试; 重试仍发往原 pid,沿用第一次提交快照;
      * _retried防环: 重建后那次重发若再失败,只提示,不再自动重建重发(B4复审)。 */
-    if(e&&e.sessionLost&&cur&&cur.id===pid&&!_retried)await rebuildSessionAndRetry(pid,()=>sendMessageTo(pid,text,true));
+    if(e&&e.sessionLost&&cur&&cur.id===pid&&!_retried)
+      await rebuildSessionAndRetry(pid,async(nb)=>{await sendMessageTo(pid,text,true,sentRaw,nb);});
     else if(e&&e.sessionLost&&_retried)toast('重建后重发仍失败，请稍后再试，内容已保留');
   }
   busy(false);
@@ -933,8 +940,8 @@ async function doReview(){
   await doReviewFor(cur.id);
 }
 /* 复盘也按显式 pid 走(B4复审): 重建重试不会落到切换后的当前事项上。 */
-async function doReviewFor(pid,_retried){
-  const base=cur&&cur.id===pid?curBase:undefined;
+async function doReviewFor(pid,_retried,_base){
+  const base=_base!==undefined?_base:(cur&&cur.id===pid?curBase:undefined);
   busy(true);
   try{
     const r=await api('/api/projects/'+pid+'/review',{base:base},undefined,{pid});
@@ -945,7 +952,7 @@ async function doReviewFor(pid,_retried){
     }
   }catch(e){
     if(e&&e.hint)toast(e.hint);
-    if(e&&e.sessionLost&&cur&&cur.id===pid&&!_retried)await rebuildSessionAndRetry(pid,()=>doReviewFor(pid,true));
+    if(e&&e.sessionLost&&cur&&cur.id===pid&&!_retried)await rebuildSessionAndRetry(pid,async(nb)=>{await doReviewFor(pid,true,nb);});
     else if(e&&e.sessionLost&&_retried)toast('重建后复盘仍失败，请稍后再试');
   }
   busy(false);

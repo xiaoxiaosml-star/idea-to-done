@@ -62,6 +62,14 @@ function probeHealth(pt){
 function releaseLock(){
   const c=lockContent();
   if(c&&c.nonce===lockNonce){try{fs.unlinkSync(LOCK_FILE);}catch(_){}}
+  /* 退出时顺带撤走自己的回收许可(只删验证pid归自己的,不碰别人的) */
+  try{
+    for(const f of fs.readdirSync(DATA)){
+      if(!f.startsWith('.writer.lock.claim'))continue;
+      const cc=(()=>{try{return JSON.parse(fs.readFileSync(path.join(DATA,f),'utf8'));}catch(_){return null;}})();
+      if(cc&&cc.pid===process.pid)try{fs.unlinkSync(path.join(DATA,f));}catch(_){}
+    }
+  }catch(_){}
 }
 async function acquireLock(){
   for(let attempt=0;attempt<3;attempt++){
@@ -88,37 +96,82 @@ async function acquireLock(){
           +'/，实例 '+c.iid+')，只是锁里的 pid 记录已失真；不夺锁。本实例已退出，未读写任何数据。');
         return false;
       }
-      /* 残留锁回收也要互斥提交(B1复审): 用一个回收许可文件(openSync 'wx' 原子创建,同 mkdir)。
-       * 读到许可但身份缺失/不可读=别人正在占用(创建与写入之间的微窗口),绝不当残留删——
-       * 只删"JSON完整且pid已死"的真残留(顺带30s老化兜底创建后崩溃的空白许可)。
-       * 拿到许可后再重读 nonce 确认锁没换手,替换后再验证锁确实归自己,否则放弃。 */
-      const CLAIM_FILE=LOCK_FILE+'.claim';
-      const claimContent=()=>{try{return JSON.parse(fs.readFileSync(CLAIM_FILE,'utf8'));}catch(_){return null;}};
-      const claimStale=()=>{try{return Date.now()-fs.statSync(CLAIM_FILE).mtimeMs>30000;}catch(_){return false;}};
-      const takeClaim=()=>{
-        for(let retry=0;retry<2;retry++){
-          let fd=null;
-          try{
-            fd=fs.openSync(CLAIM_FILE,'wx');
-            fs.writeFileSync(fd,JSON.stringify({pid:process.pid,at:new Date().toISOString()}));
-            fs.closeSync(fd);
-            return true;
-          }catch(e){
-            if(fd!==null){try{fs.closeSync(fd);}catch(_){}}
-            if(e.code!=='EEXIST')return false;
-            const cc=claimContent();
-            if(cc&&pidAlive(cc.pid))return false;        /* 有别的进程正在回收,让给它 */
-            if(!cc&&!claimStale())return false;          /* 占用中(写入微窗口/未知),不抢 */
-            try{fs.unlinkSync(CLAIM_FILE);}catch(_){return false;}   /* 真残留才清 */
+      /* 残留锁回收也要互斥提交(F1复审): 回收许可用"进程唯一名"创建,全程没有"删除固定路径"
+       * 这一步——旧观察不可能删到新持有者的许可。协议:
+       *  1) 以 .writer.lock.claim.<pid>-<rand> 唯一名原子占位并写入身份;
+       *  2) 扫描全部许可(含旧版固定名 .writer.lock.claim): 有任何别的活pid=让别人,有任何
+       *     身份缺失且文件很新(<2s, 创建与写身份之间的微窗口)=按占用让别人; 死pid许可忽略;
+       *  3) 赢后(替换+验主成功)才清理: 只删已验证死掉的别人的许可和自己的许可,
+       *     释放(exit路径)也只删内容仍归自己的那一份, 绝不无条件删别人的。
+       * 拿许可后再重读 nonce 确认锁没换手,替换后再验证锁确实归自己,否则放弃。 */
+      const CLAIM_PREFIX='.writer.lock.claim';
+      const myClaim=path.join(DATA,CLAIM_PREFIX+'.'+process.pid+'-'+crypto.randomBytes(3).toString('hex'));
+      const myClaimNonce=crypto.randomBytes(6).toString('hex');
+      const readClaim=f=>{try{return JSON.parse(fs.readFileSync(f,'utf8'));}catch(_){return null;}};
+      const claimFresh=f=>{try{return Date.now()-fs.statSync(f).mtimeMs<2000;}catch(_){return false;}};
+      const scanOnce=()=>{
+        let entries=[];
+        try{entries=fs.readdirSync(DATA);}catch(_){}
+        for(const f of entries){
+          if(f===path.basename(myClaim))continue;
+          if(!f.startsWith(CLAIM_PREFIX))continue;
+          const full=path.join(DATA,f);
+          const cc=readClaim(full);
+          if(cc&&Number.isInteger(cc.pid)){
+            if(pidAlive(cc.pid))return false;              /* 有活回收者,让 */
+            continue;                                      /* 死许可忽略,赢后GC */
           }
+          if(claimFresh(full))return false;                /* 写入微窗口,让 */
+        }
+        return true;
+      };
+      const takeClaim=()=>{
+        /* 每次扫描都现读目录(F1复验教训: 预读快照会让双方互看不见);
+         * 连扫两遍(间隔150ms)。安全性: 双方都是"先建自己的许可再扫",后扫的一方必能看见
+         * 先建方的活pid,故不可能双方同过。撞见别人=撤自己的占位、退避后重试(有界),
+         * 而不是双双放弃——赢方几毫秒内就会收完锁撤许可,输方重试时会在锁核实处自然退出。 */
+        for(let attempt=0;attempt<6;attempt++){
+          try{
+            const fd=fs.openSync(myClaim,'wx');
+            fs.writeFileSync(fd,JSON.stringify({pid:process.pid,nonce:myClaimNonce,at:new Date().toISOString()}));
+            fs.closeSync(fd);
+          }catch(_){}
+          let clean=scanOnce();
+          if(clean){
+            const t=Date.now();while(Date.now()-t<150);
+            clean=scanOnce();
+          }
+          if(clean)return true;
+          try{fs.unlinkSync(myClaim);}catch(_){}          /* 撤自己的占位 */
+          const wait=250+attempt*150;                      /* 退避, 上限~1s */
+          const tw=Date.now();while(Date.now()-tw<wait);
         }
         return false;
       };
-      const dropClaim=()=>{try{fs.unlinkSync(CLAIM_FILE);}catch(_){}};
+      const dropClaim=onlyMine=>{
+        try{
+          const c=readClaim(myClaim);
+          if(onlyMine&&(!c||c.nonce!==myClaimNonce||c.pid!==process.pid))return;  /* 不归我,不碰 */
+          fs.unlinkSync(myClaim);
+        }catch(_){}
+      };
+      const gcDeadClaims=()=>{
+        let claimsDir=[];
+        try{claimsDir=fs.readdirSync(DATA);}catch(_){}
+        for(const f of claimsDir){
+          if(!f.startsWith(CLAIM_PREFIX))continue;
+          const full=path.join(DATA,f);
+          if(full===myClaim)continue;
+          const cc=readClaim(full);
+          if(cc&&Number.isInteger(cc.pid)&&pidAlive(cc.pid))continue;   /* 活的绝不碰 */
+          try{fs.unlinkSync(full);}catch(_){}                           /* 只清已验证的死许可 */
+        }
+      };
       if(!takeClaim()){
         console.error('[成事工坊] 另一个实例正在回收这把崩溃残留锁，本实例退出，未读写任何数据。');
         return false;
       }
+      let won=false;
       try{
         const cur=lockContent();                      /* 持有回收许可后再核实: 锁没换手才替换 */
         if(!cur||cur.nonce!==c.nonce)return false;    /* 已由别人收走, 直接退出重试循环 */
@@ -127,13 +180,17 @@ async function acquireLock(){
         renameWithRetry(tmp,LOCK_FILE);               /* 原子替换;持有者已核实退出 */
         const now=lockContent();                      /* 替换后再验证: 锁确实归本进程 */
         if(!now||now.nonce!==lockNonce)return false;  /* 极端交错:别人后写覆盖,放弃不当写者 */
+        won=true;
         console.log('[成事工坊] 已回收崩溃残留的数据目录锁(持有者进程不存在且无匹配服务应答)。');
         return true;
       }catch(err){
         console.error('[成事工坊] 回收残留锁时写入失败，本实例退出，未读写任何数据。('+String(err&&err.message||err)+')');
         return false;
       }
-      finally{dropClaim();}
+      finally{
+        if(won)gcDeadClaims();                        /* 赢后才清死许可(含旧版固定名残留) */
+        dropClaim(true);                              /* 释放只删仍归自己的那一份 */
+      }
     }
   }
   console.error('[成事工坊] 无法取得数据目录写权限(锁核实重试耗尽)，本实例退出，未读写任何数据。');
@@ -260,17 +317,32 @@ function contextBlock(p){
   }
   if(p.decision)L.push('【当前结局决定】'+({done:'达成',go:'继续验证',pause:'暂停',stop:'终止'})[p.decision.type]+'：'+p.decision.reason);
   if(p.discussion&&p.discussion.length){
-    /* 讨论历史进上下文(B4复审): 重建/续谈都以它捡起用户明说过的约束(如时间限制、边界),
-     * 不静默丢。用户消息全量带; AI 回复截断到头部, 超长只带最近一段, 防止提示词膨胀。 */
+    /* 讨论历史进上下文(F3复审): 用户消息全量带(早期硬约束不得被尾部条数限制截掉),
+     * 只缩减 AI 历史(最新15条,每条截300字); 重建/续谈都以此捡起用户明说过的约束。 */
     const msgs=p.discussion;
-    const tail=msgs.length>30?msgs.slice(msgs.length-30):msgs;
-    L.push('【讨论记录(用户说过的话全部算数,尤其是明确约束,继续讨论必须全部遵守)】\n'+tail.map(m=>
-      (m.role==='user'?'用户：':'AI：')+(m.role==='user'?String(m.text):String(m.text).slice(0,400))).join('\n'));
+    const userMsgs=msgs.filter(m=>m.role==='user');
+    const allAi=msgs.filter(m=>m.role!=='user');
+    const aiMsgs=allAi.slice(-15);
+    const line=m=>(m.role==='user'?'用户：':'AI：')+(m.role==='user'?String(m.text):String(m.text).slice(0,300));
+    const body=[
+      ...userMsgs.map(line),
+      ...(aiMsgs.length<allAi.length?['（更早的 AI 回复从略；用户消息以上全量保留）']:[]),
+      ...aiMsgs.map(line)
+    ].join('\n');
+    L.push('【讨论记录(用户说过的话全部算数,尤其是明确约束,继续讨论必须全部遵守)】\n'+body);
   }
-  if(p.planHistory&&p.planHistory.length)
-    L.push('【历史计划版本(仅留档,均不再执行)】\n'+p.planHistory.map(h=>
-      'v'+h.version+'（'+(h.archiveReason||'已替换')+'，止于 '+String(h.archivedAt||'').slice(0,10)+'）'
-      +'\n要验证：'+(h.question||'未填')+'｜动作：'+(h.action||'未填')+'｜停止条件：'+(h.stop||'未填')).join('\n'));
+  if(p.planHistory&&p.planHistory.length){
+    /* 历史计划正文用与当前计划同一套语义字段(F3: 验收标准/投入上限数值/继续信号/证据要求
+     * 都是对照补记执行所需的事前条件),并明确标注留档、不冒充当前待执行计划。 */
+    const histLine=h=>'v'+h.version+'（'+(h.archiveReason||'已替换')+'，止于 '+String(h.archivedAt||'').slice(0,10)+'）[留档,不再执行]'
+      +'\n要验证：'+(h.question||'未填')+'\n动作：'+(h.action||'未填')+'\n完成标准：'+(h.accept||'未填')
+      +'\n投入上限：'+(h.budget||'未填')
+      +(h.budgetMoney!=null?'（钱 '+h.budgetMoney+' 元）':'')+(h.budgetTime!=null?'（时间 '+h.budgetTime+' 小时）':'')
+      +'\n支持继续的信号：'+(h.continueSignal||'未写明')
+      +'\n停止条件：'+(h.stop||'未填')+'\n要带回的证据：'+(h.evidenceToBring||'未填')
+      +(h.tool==='trial'?'\n适用工具：首次小生意验证单':'');
+    L.push('【历史计划版本(仅留档,均不再执行; 对照补记的旧执行记录时以它的事前条件为准)】\n'+p.planHistory.map(histLine).join('\n'));
+  }
   return L.join('\n\n');
 }
 const CONTRACT=`【运行环境】你在「成事工坊」本地工作台里被调用，讨论只围绕上面这一件事。不要使用或读取任何个人记忆文件；需要方法细节时，只读安装目录下的 chapters/、deep-dive/、tools/（已授权）。
