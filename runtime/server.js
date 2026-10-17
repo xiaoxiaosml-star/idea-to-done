@@ -25,6 +25,83 @@ const norm=p=>path.resolve(p).replace(/\\/g,'/').toLowerCase();
 const ROOT_FP=crypto.createHash('sha1').update(norm(ROOT)).digest('hex').slice(0,12);
 const SKILL_CMD=process.env.CHENGSHI_SKILL||'/chengshi-workshop:idea-to-done';
 fs.mkdirSync(PROJ,{recursive:true});
+const DATA_FP=crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12);
+
+/* ---- 数据目录单写者锁(R01): 端口顺延会让第二个实例变成隐形双写者, 所以在监听前先原子
+ * 取得数据目录级写权限。锁文件 = DATA/.writer.lock {pid,iid,port,root,data,nonce,startedAt}。
+ * 已存在时核实持有者身份: 进程仍活着→明确退出并指回已确认服务; 进程已死但锁里端口仍有
+ * 同 iid 的健康应答→持有者在(只是 pid 记录失真),不夺锁; 进程已死且无匹配健康应答→身份
+ * 已灭可核实,原子替换回收。释放锁只认 nonce,绝不删掉别人的新锁。 */
+const LOCK_FILE=path.join(DATA,'.writer.lock');
+const lockNonce=crypto.randomBytes(8).toString('hex');
+const lockContent=()=>{try{return JSON.parse(fs.readFileSync(LOCK_FILE,'utf8'));}catch(_){return null;}};
+const pidAlive=p=>{if(!p||!Number.isInteger(p))return false;try{process.kill(p,0);return true;}catch(e){return e.code==='EPERM';}};
+function probeHealth(pt){
+  return new Promise(res=>{
+    if(!pt)return res(null);
+    const rq=http.get({host:'127.0.0.1',port:pt,path:'/api/health',timeout:1200},r=>{
+      let b='';r.on('data',d=>b+=d);r.on('end',()=>{let j=null;try{j=JSON.parse(b);}catch(_){}res(j&&j.ok===true?j:null);});
+    });
+    rq.on('timeout',()=>{rq.destroy();res(null);});
+    rq.on('error',()=>res(null));
+  });
+}
+function releaseLock(){
+  const c=lockContent();
+  if(c&&c.nonce===lockNonce){try{fs.unlinkSync(LOCK_FILE);}catch(_){}}
+}
+async function acquireLock(){
+  for(let attempt=0;attempt<3;attempt++){
+    const payload={pid:process.pid,iid,port:port||0,root:ROOT_FP,data:DATA_FP,nonce:lockNonce,startedAt:new Date().toISOString()};
+    try{
+      const fd=fs.openSync(LOCK_FILE,'wx');
+      fs.writeFileSync(fd,JSON.stringify(payload));
+      fs.closeSync(fd);
+      return true;
+    }catch(e){
+      if(e.code!=='EEXIST')return false;              /* 目录不可写等: 如实失败,不充当写者 */
+      const c=lockContent();
+      if(!c)continue;                                 /* 读到一半被删: 重试 */
+      if(c.nonce===lockNonce)return true;             /* 本进程已持有(重入保护) */
+      if(pidAlive(c.pid)){
+        console.error('[成事工坊] 数据目录已被另一个成事工坊服务持有(pid '+c.pid
+          +(c.port?'，http://127.0.0.1:'+c.port+'/':'')
+          +')。同一数据目录只允许一个写者；本实例已退出，未读写任何数据。日常请直接打开上面的地址。');
+        return false;
+      }
+      const h=await probeHealth(c.port);
+      if(h&&h.iid===c.iid){
+        console.error('[成事工坊] 数据目录的持有服务仍在应答(http://127.0.0.1:'+c.port
+          +'/，实例 '+c.iid+')，只是锁里的 pid 记录已失真；不夺锁。本实例已退出，未读写任何数据。');
+        return false;
+      }
+      const cur=lockContent();                        /* 回收前再读一次: 确认锁没换手 */
+      if(!cur||cur.nonce!==c.nonce)continue;
+      try{
+        const tmp=LOCK_FILE+'.'+process.pid;
+        fs.writeFileSync(tmp,JSON.stringify(payload));
+        fs.renameSync(tmp,LOCK_FILE);                 /* 原子替换;持有者已核实退出 */
+        console.log('[成事工坊] 已回收崩溃残留的数据目录锁(持有者进程不存在且无匹配服务应答)。');
+        return true;
+      }catch(_){return false;}
+    }
+  }
+  console.error('[成事工坊] 无法取得数据目录写权限(锁核实重试耗尽)，本实例退出，未读写任何数据。');
+  return false;
+}
+function updateLockPort(){
+  const c=lockContent();
+  if(c&&c.nonce===lockNonce){
+    try{
+      const tmp=LOCK_FILE+'.'+process.pid;
+      fs.writeFileSync(tmp,JSON.stringify({...c,port}));
+      fs.renameSync(tmp,LOCK_FILE);
+    }catch(_){}
+  }
+}
+process.on('exit',releaseLock);
+process.on('SIGINT',()=>{releaseLock();process.exit(0);});
+process.on('SIGTERM',()=>{releaseLock();process.exit(0);});
 
 /* ---- 运行时状态(端口/token/实例指纹 重启复用) ----
  * iid=本数据目录的实例指纹: 首次启动生成, 之后不变。健康检查带它,
@@ -46,6 +123,11 @@ function withLock(id,fn){
   return next;
 }
 
+/* ---- 同事项 AI 轮次互斥(R05): 讨论与复盘共用一把"模型轮次"锁。选用明确拒绝(409 ai-busy),
+ * 不产生两个基于旧 session/base 并发的业务会话分支。锁只包模型调用周期,不阻止用户
+ * 另存执行证据(executions/trials 不查此锁)。 */
+const aiBusy={};
+
 /* ---- 数据层 ---- */
 const pid=id=>path.join(PROJ,id+'.json');
 function loadProject(id){
@@ -58,7 +140,7 @@ function loadProject(id){
 function saveProject(p){
   p.version=(p.version||0)+1;
   p.updatedAt=new Date().toISOString();
-  const f=pid(p.id),tmp=f+'.tmp';
+  const f=pid(p.id),tmp=f+'.tmp-'+process.pid+'-'+crypto.randomBytes(2).toString('hex');
   fs.writeFileSync(tmp,JSON.stringify(p,null,2),'utf8');
   fs.renameSync(tmp,f);                        /* 原子替换,失败时旧文件仍在 */
   return p;
@@ -127,11 +209,13 @@ function contextBlock(p){
     }).join('\n'));
   }
   if(p.decision)L.push('【当前结局决定】'+({done:'达成',go:'继续验证',pause:'暂停',stop:'终止'})[p.decision.type]+'：'+p.decision.reason);
+  if(p.planHistory&&p.planHistory.length)
+    L.push('【历史计划版本(仅留档,均不再执行)】'+p.planHistory.map(h=>'v'+h.version+'（'+(h.archiveReason||'已替换')+'，止于 '+String(h.archivedAt||'').slice(0,10)+'）').join('；'));
   return L.join('\n\n');
 }
 const CONTRACT=`【运行环境】你在「成事工坊」本地工作台里被调用，讨论只围绕上面这一件事。不要使用或读取任何个人记忆文件；需要方法细节时，只读安装目录下的 chapters/、deep-dive/、tools/（已授权）。
 【纪律】区分事实与假设，不把假设记成事实；不凭聊天判断市场已可行；计划草案必须等用户在网页上确认后才生效，你不替用户确认计划或结局；不要改动或撤销用户已确认的计划。
-【定位器】需要给念头定方向时，读 chapters/附-道法术器_念头定位.md 做四层定位：道层(政策/法律/税务/平台规则/自然规律/信仰)有一票否决的硬伤就直接建议停、不进计划，拿不准的标"待核实"给用户检索词自查；其余情况只指出当前最薄的一层，不要求各层齐全。出计划时说明本计划主要补哪层；复盘时对照回答这轮补足了哪层、还缺哪层。
+【定位器】需要给念头定方向时，读 chapters/附-道法术器_念头定位.md 做四层定位：道层(政策/法律/税务/平台规则/自然规律/信仰)有一票否决的硬伤就直接建议停、不进计划，拿不准的标"待核实"给用户检索词自查，不把未知包装成事实；其余情况只指出当前最薄的一层，不要求各层齐全。法层"谁付钱、为什么付"只对商业事项问（小生意/副业/收费服务）；非商业事项（备考、求职、搬家、学技能等）通用检查只问目标、约束、下一步、证据。一条变现路径走不通=建议换路径或调整模式，不因此否决整个目标；只有道层硬伤才建议停。出计划时说明本计划主要补哪层；复盘时对照回答这轮补足了哪层、还缺哪层。
 【数据协议】每一轮都是独立回复：不要复述之前轮次说过的内容，只回应当前任务与最新信息。正文写给用户看，语气直接、少客套。正文之后必须另起一行输出且只输出一个 fenced code block（以三个反引号加 json 开头、以三个反引号结尾，块不完整视为接口故障），内容只含以下三种之一，不要输出任何其他 JSON 块：
 {"type":"questions","items":["当前最影响判断的问题"]}            —— 信息不足以出计划时
 {"type":"plan","question":"本计划要验证什么","action":"具体动作(能今天就开干的)","accept":"做到什么程度算完","budget":"投入上限(时间/钱,写数字)","stop":"出现什么结果该停","evidenceToBring":"要带回的证据","budgetMoney":100,"budgetTime":2,"continueSignal":"出现什么实测结果支持继续","tool":"trial"}  —— 信息足够时；这只会成为待确认草案，不会自动替换已确认计划。budgetMoney=钱上限(元,纯数字)、budgetTime=时间上限(小时,纯数字)：写得出确定数字才填，写不出就省略字段，不许猜；continueSignal=支持继续的实测信号，必须区别于 accept（完成只证明动作做完，不代表生意值得继续），想清楚再填；tool 仅当本计划是面向陌生成交的小生意小试（要记录触达/成交/营业额/成本来算利润账）时才带 "trial"，其他事项一律省略该字段，让工作台按显式标记展开验证单工具
@@ -145,12 +229,14 @@ function discussPrompt(p,userText){
       :'这是本事项的开场讨论。先澄清事实、假设、未知项与投入边界；信息不足以出计划时，问当前最影响判断的问题（不超过3个）；足够时直接给计划草案。');
 }
 function execHasReal(e){return !!(e&&(e.result&&e.result.trim())||(e.evidence&&e.evidence.trim()));}
-/* 验证单算实测证据: 任一实测字段(r1-r9)已填, 或复盘三行(c1-c3)有内容; 只填事前条件(q1-q4)不算 */
+/* 验证单算实测证据(R06): 区分准备、实际行动、观察到的结果。
+ * 任一实测字段(r1-r9)已填即算——合法的 0 单/0 收入也是观察,不用真假值把 0 当没填;
+ * 只填动作(c1"明天准备去做")或事前条件(q1-q4)不算实测;结果数字(c2)/结论(c3)算。 */
 function trialHasReal(t){
   if(!t)return false;
   if(t.nums&&['r1','r2','r3','r4','r5','r6','r7','r8','r9'].some(k=>t.nums[k]!==null&&t.nums[k]!==undefined))return true;
   const q=t.inputs||{};
-  return !!((q.c1&&q.c1.trim())||(q.c2&&q.c2.trim())||(q.c3&&q.c3.trim()));
+  return !!((q.c2&&String(q.c2).trim())||(q.c3&&String(q.c3).trim()));
 }
 function reviewPrompt(p){
   /* 统一证据时间线: 执行记录与验证单都能发起复盘, 以最新一条为本次复盘对象 */
@@ -231,29 +317,54 @@ const server=http.createServer(async(req,res)=>{
     if(origin&&!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin))return send(res,403,{error:'bad-origin'});
 
     if(P==='/api/health')return send(res,200,{ok:true,version:VERSION,service:'chengshi-workshop',data:crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12),iid,root:ROOT_FP,pid:process.pid});
+    /* 独立工具页面: 只放行 tools/ 下文件名安全且存在的 html,不变成任意本机文件读取 */
+    if(P.startsWith('/tool/')){
+      const name=decodeURIComponent(P.slice(6));
+      if(!/^[\w一-鿿-]+\.html$/.test(name))return send(res,404,{error:'not-found'});
+      const full=path.join(ROOT,'tools',name);
+      if(!fs.existsSync(full)||!fs.statSync(full).isFile())return send(res,404,{error:'not-found'});
+      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
+      return fs.createReadStream(full).pipe(res);
+    }
     if(!P.startsWith('/api/'))return serveStatic(res,P);
     if(req.headers['x-chengshi-token']!==token)return send(res,401,{error:'unauthorized'});
     const parts=P.split('/').filter(Boolean);
     const body=['POST','PUT'].includes(req.method)?await readBody(req):{};
 
+    /* 方法与示例目录(R10): 显式分组的主线/深潜手册/案例/工具表,研究旧稿、AGENTS、
+     * 维护文件不进目录。methods 为全量扁平数组,保持旧客户端可用。 */
     if(P==='/api/methods'){
-      const out=[];
-      for(const dir of ['chapters','deep-dive']){
-        const d=path.join(ROOT,dir);
-        if(fs.existsSync(d))for(const f of fs.readdirSync(d).filter(f=>f.endsWith('.md')).sort())
-          out.push({path:dir+'/'+f,title:f.replace(/\.md$/,'')});
+      const mdDir=d=>{const full=path.join(ROOT,d);return fs.existsSync(full)
+        ?fs.readdirSync(full).filter(f=>f.endsWith('.md')).sort().map(f=>({path:d.replace(/\\/g,'/')+'/'+f,title:f.replace(/\.md$/,'')}))
+        :[];};
+      const caseItems=[...mdDir('cases')];
+      const dc=path.join(ROOT,'deep-dive','cases');
+      if(fs.existsSync(dc))for(const sub of fs.readdirSync(dc).sort()){
+        const sd=path.join(dc,sub);
+        if(fs.statSync(sd).isDirectory())
+          for(const f of fs.readdirSync(sd).filter(f=>f.endsWith('.md')).sort())
+            caseItems.push({path:'deep-dive/cases/'+sub+'/'+f,title:sub+'/'+f.replace(/\.md$/,'')});
       }
-      return send(res,200,{methods:out});
+      const groups=[
+        {key:'main',label:'主线 · 第零步 + 五编',items:mdDir('chapters')},
+        {key:'handbook',label:'深潜 ·《从一个念头到一门生意》19 章手册',items:mdDir('deep-dive/handbook')},
+        {key:'cases',label:'案例库（真实复盘收稿中 + 演算示例）',items:caseItems},
+        {key:'tooltables',label:'深潜 · 29 张工具表',items:mdDir('deep-dive/tools')},
+        {key:'tooldoc',label:'独立工具说明',items:[{path:'tools/README.md',title:'工具箱总览'}]}
+      ];
+      return send(res,200,{groups,methods:groups.flatMap(g=>g.items)});
     }
+    /* 正文接口: 只服务约定公开内容(白名单根 + 相对路径校验),越界/非 md/不存在一律 404 */
     if(P==='/api/methods/content'){
-      const rel=(u.searchParams.get('p')||'').replace(/\\/g,'/');
+      const rel=(u.searchParams.get('p')||'').replace(/\\/g,'/').replace(/^\.\//,'').replace(/\/+/g,'/');
+      const allowed=/^(chapters\/[^/]+\.md|deep-dive\/handbook\/[^/]+\.md|deep-dive\/tools\/[^/]+\.md|deep-dive\/cases\/[^/]+\/[^/]+\.md|cases\/[^/]+\.md|tools\/README\.md)$/;
+      if(!allowed.test(rel))return send(res,404,{error:'not-found'});
       const full=path.resolve(ROOT,rel);
       const rel2=path.relative(ROOT,full);
-      if(rel2.startsWith('..')||path.isAbsolute(rel2)||!full.endsWith('.md')||!fs.existsSync(full))
+      if(rel2.startsWith('..')||path.isAbsolute(rel2)||!fs.existsSync(full))
         return send(res,404,{error:'not-found'});
       return send(res,200,{content:fs.readFileSync(full,'utf8')});
     }
-
     if(P==='/api/projects'&&req.method==='GET')return send(res,200,{projects:listProjects()});
     if(P==='/api/projects'&&req.method==='POST'){
       if(!body.idea||!body.idea.trim())return send(res,400,{error:'idea-required'});
@@ -275,19 +386,26 @@ const server=http.createServer(async(req,res)=>{
         return send(res,200,{project:p});
       }
 
-      /* 讨论/回答: 入口查base,AI返回后基于最新状态合并,绝不回写旧快照 */
+      /* 讨论/回答: 入口查base;同事项 AI 轮次互斥(拒绝式,不产生双会话分支);AI返回后基于最新状态合并,绝不回写旧快照 */
       if(parts[3]==='messages'&&req.method==='POST'){
         if(!body.text||!body.text.trim())return send(res,400,{error:'text-required'});
         const entry=loadProject(id);
         if(!entry)return send(res,404,{error:'not-found'});
         if(!needBase(entry))return;
-        const entryVersion=entry.version;
-        const userMsg={role:'user',text:body.text.trim(),at:new Date().toISOString()};
-        const r=await callClaude({prompt:discussPrompt(entry,body.text.trim()),sessionId:entry.sessionId,cwd:ROOT,methodsRoot:ROOT});
+        if(aiBusy[id])return send(res,409,{error:'ai-busy'});
+        aiBusy[id]=true;
+        try{
+        /* 真正开始前重查版本与会话: 以调用发起瞬间的最新状态为准 */
+        const pre=loadProject(id)||entry;
+        const entryVersion=pre.version;
+        const callStart=new Date().toISOString();
+        const userMsg={role:'user',text:body.text.trim(),at:callStart};
+        const r=await callClaude({prompt:discussPrompt(pre,body.text.trim()),sessionId:pre.sessionId,cwd:ROOT,methodsRoot:ROOT});
         if(!r.ok){
-          /* 失败: 不落任何写,并发期间的其他修改原样保留 */
+          /* 失败: 不落任何写,并发期间的其他修改原样保留; 会话失效给前端重建入口 */
           const cur=loadProject(id);
-          return send(res,502,{error:'ai-call-failed',detail:r.error,project:cur});
+          const lost=/session|conversation|resume/i.test(String(r.error||''));
+          return send(res,502,{error:'ai-call-failed',detail:r.error,project:cur,sessionLost:lost});
         }
         const proto=parseProtocol(r.text);
         const aiMsg={role:'ai',text:r.text,at:new Date().toISOString(),cost:r.costUsd,
@@ -298,15 +416,20 @@ const server=http.createServer(async(req,res)=>{
           F.discussion.push(userMsg,aiMsg);
           F.sessionId=r.sessionId||F.sessionId;
           if(proto.ok&&proto.type==='plan'){
-            /* 草案不触碰已确认计划; 覆盖旧草案须无妨,但保留痕迹 */
-            if(F.planDraft)F.planHistory.push({...F.planDraft,archivedAt:new Date().toISOString(),archiveReason:'被新草案替换'});
-            F.planDraft={...proto.data,version:F.plan?F.plan.version+1:1,author:'ai',createdAt:new Date().toISOString()};
+            /* 草案不触碰已确认计划; 覆盖旧草案须无妨,但保留痕迹。
+             * 用户在等待期间手写的较新草案优先,AI 旧响应不得倒回覆盖(R05/T19) */
+            const newerUserDraft=F.planDraft&&F.planDraft.createdAt&&F.planDraft.createdAt>callStart&&F.planDraft.author==='user';
+            if(!newerUserDraft){
+              if(F.planDraft)F.planHistory.push({...F.planDraft,archivedAt:new Date().toISOString(),archiveReason:'被新草案替换'});
+              F.planDraft={...proto.data,version:F.plan?F.plan.version+1:1,author:'ai',createdAt:new Date().toISOString()};
+            }
           }
           if(F.version!==entryVersion)aiMsg.stale=true;          /* AI期间有人改过数据,复盘基于稍早状态 */
           saveProject(F);
           return F;
         });
         return send(res,200,{project:merged,ai:{callOk:true,protocolOk:proto.ok,protocol:proto.ok?{type:proto.type,...proto.data}:null,error:proto.ok?undefined:proto.error}});
+        }finally{aiBusy[id]=false;}
       }
 
       /* 确认草案 → 成为执行计划(替换已确认计划时须给理由,旧版留档) */
@@ -363,17 +486,28 @@ const server=http.createServer(async(req,res)=>{
         return send(res,200,{project:result});
       }
 
-      /* 执行记录(证据),关联当前已确认计划版本 */
+      /* 执行记录(证据)。默认关联当前已确认计划版本;支持显式 planVersion 补记历史版本,
+       * 只接受当前或历史留档版本,非法/不存在即拒,旧记录不静默重标(R06) */
       if(parts[3]==='executions'&&req.method==='POST'){
         const result=await withLock(id,()=>{
           const F=loadProject(id);
           if(!F){send(res,404,{error:'not-found'});return null;}
           if(!needBase(F))return null;
           if(!body.action||!body.action.trim())return send(res,400,{error:'action-required'}),null;
+          const curVer=F.plan&&F.plan.status==='confirmed'?F.plan.version:0;
+          let planVer=curVer;
+          if(body.planVersion!==undefined&&body.planVersion!==null&&body.planVersion!==''){
+            const pv=Number(body.planVersion);
+            const histVers=(F.planHistory||[]).map(h=>h.version);
+            if(!Number.isInteger(pv)||(pv!==curVer&&!histVers.includes(pv))){
+              send(res,400,{error:'bad-plan-version',current:curVer});return null;
+            }
+            planVer=pv;
+          }
           const e={id:'e'+Date.now().toString(36)+crypto.randomBytes(2).toString('hex'),
             action:body.action.trim(),input:(body.input||'').trim(),result:(body.result||'').trim(),
             evidence:(body.evidence||'').trim(),note:(body.note||'').trim(),
-            planVersion:F.plan&&F.plan.status==='confirmed'?F.plan.version:0,
+            planVersion:planVer,
             at:new Date().toISOString()};
           if(!validExecution(e))return send(res,400,{error:'bad-execution'}),null;
           F.executions.push(e);
@@ -416,19 +550,27 @@ const server=http.createServer(async(req,res)=>{
         return send(res,200,{project:loadProject(id),trial:result});
       }
 
-      /* 带着最新证据续谈复盘: 只接受合法 review 协议才计入"已复盘" */
+      /* 带着最新证据续谈复盘: 只接受合法 review 协议才计入"已复盘"。
+       * R04: 有合法计划+真实证据时允许首次复盘直接创建会话,不要求先聊一句;
+       * R05: 与讨论共用 AI 轮次互斥;真正开始前重查版本与会话。 */
       if(parts[3]==='review'&&req.method==='POST'){
         const entry=loadProject(id);
         if(!entry)return send(res,404,{error:'not-found'});
         if(!needBase(entry))return;
-        const entryVersion=entry.version;
+        if(aiBusy[id])return send(res,409,{error:'ai-busy'});
         const hasReal=entry.executions.some(execHasReal)||(entry.trials||[]).some(trialHasReal);
-        if(!hasReal)return send(res,400,{error:'no-real-evidence'});
-        if(!entry.sessionId)return send(res,400,{error:'no-session'});
-        const r=await callClaude({prompt:reviewPrompt(entry),sessionId:entry.sessionId,cwd:ROOT,methodsRoot:ROOT});
+        if(!hasReal)return send(res,400,{error:'no-real-evidence',project:entry,
+          hint:'还没有可对照的实测结果。先回「执行」面板补上真实结果（合法的 0 单/0 收入也算观察），再点复盘。'});
+        aiBusy[id]=true;
+        try{
+        const pre=loadProject(id)||entry;
+        const entryVersion=pre.version;
+        /* sessionId 为空=首次复盘: 不带 --resume,Claude 会创建新会话,上下文由 reviewPrompt 全量带入 */
+        const r=await callClaude({prompt:reviewPrompt(pre),sessionId:pre.sessionId||undefined,cwd:ROOT,methodsRoot:ROOT});
         if(!r.ok){
           const cur=loadProject(id);
-          return send(res,502,{error:'ai-call-failed',detail:r.error,project:cur});
+          const lost=/session|conversation|resume/i.test(String(r.error||''));
+          return send(res,502,{error:'ai-call-failed',detail:r.error,project:cur,sessionLost:lost});
         }
         const proto=parseProtocol(r.text);
         const isReview=proto.ok&&proto.type==='review';
@@ -438,12 +580,28 @@ const server=http.createServer(async(req,res)=>{
             protocol:isReview?{type:'review',...proto.data}:null,
             protoError:isReview?undefined:(proto.ok?('unexpected-type:'+proto.type):proto.error),
             stale:F.version!==entryVersion});
+          F.sessionId=r.sessionId||F.sessionId;             /* 首次复盘的会话从这里接上 */
           if(isReview)F.stage='review';
           return saveProject(F);
         });
         return send(res,200,{project:merged,ai:{callOk:true,protocolOk:isReview,
           protocol:isReview?{type:'review',...proto.data}:null,
           error:isReview?undefined:(proto.ok?('unexpected-type:'+proto.type):proto.error)}});
+        }finally{aiBusy[id]=false;}
+      }
+
+      /* 会话失效后的显式重建(R05): 用户确认后清空 sessionId,下一次调用以 contextBlock 里的
+       * 已确认计划/历史版本/全部证据开新会话,不静默丢约束;不替用户发起任何模型调用。 */
+      if(parts[3]==='session'&&parts[4]==='rebuild'&&req.method==='POST'){
+        const result=await withLock(id,()=>{
+          const F=loadProject(id);
+          if(!F){send(res,404,{error:'not-found'});return null;}
+          if(!needBase(F))return null;
+          F.sessionId=null;
+          return saveProject(F);
+        });
+        if(!result)return;
+        return send(res,200,{project:result,rebuilt:true});
       }
 
       /* 结局决定(用户确认动作,任何时候可记) */
@@ -468,15 +626,17 @@ const server=http.createServer(async(req,res)=>{
   }
 });
 
-/* ---- 启动 ---- */
+/* ---- 启动: 先原子取得数据目录单写者锁(R01),拿不到就明确退出,绝不监听写数据 ---- */
 function start(){
   const tryListen=(pt,left)=>{
     server.once('error',err=>{
       if(err.code==='EADDRINUSE'&&left>0)return tryListen(pt+1,left-1);
+      releaseLock();
       console.error('[成事工坊] 端口占用,启动失败:',err.message);process.exit(1);
     });
     server.listen(pt,'127.0.0.1',()=>{
       port=pt;
+      updateLockPort();
       fs.writeFileSync(rtFile,JSON.stringify({token,port,pid:process.pid,version:VERSION,iid,root:ROOT},null,2));
       console.log('[成事工坊] 本地服务已启动:');
       console.log('  工作台  http://127.0.0.1:'+pt+'/');
@@ -484,6 +644,9 @@ function start(){
       console.log('  停止    Ctrl+C');
     });
   };
-  tryListen(port||4310,20);
+  acquireLock().then(ok=>{
+    if(!ok){process.exitCode=1;return process.exit(1);}
+    tryListen(port||4310,20);
+  });
 }
 start();
