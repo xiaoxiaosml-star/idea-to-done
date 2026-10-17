@@ -290,7 +290,7 @@
       <label>⭐ 最有效的一招（下次遇到别的事直接复用的那个）</label>
       <input type="text" id="s5_best" placeholder="例：先摆一天再说——动作永远比完美计划值钱" oninput="saveS5('best',this.value)">
       <div id="s5Stuck" style="display:none;margin-top:10px;background:#fbf6ec;border:1px dashed var(--wood-lt);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--muted)">
-        <b style="color:var(--wood)">圈不出三个关键转折？</b>→ 从头到尾读一遍上面的来路地图，转折处会自己跳出来；还圈不出＝留下的卡还太少，回前面几关把动作和结果补齐，地图自己会变清楚。
+        <b style="color:var(--wood)">圈不出三个关键转折？</b>→ 从头到尾读一遍上面的来路地图，转折处会自己跳出来；还圈不出＝做完且留证据的卡还太少。<b>不急</b>：关键转折是工序卡的记录完整度，<b>不影响</b>你在「结局」页如实选结局收这件事——证据够了随时收尾，不用为了凑齐三道关卡再多做一轮。
       </div>
       <button class="mini" style="margin-top:8px" onclick="document.getElementById('s5Stuck').style.display=''">😖 想不起来？</button>
     </div>
@@ -339,6 +339,7 @@
       <div class="big" id="certNum"></div>
       <div id="certOutcome" style="font-size:13px;color:var(--gold);margin-top:10px;font-weight:600"></div>
       <div class="rows" id="certRows"></div>
+      <div class="sub" style="text-align:center;margin-top:10px;font-size:12px">这张卡是<b>记录完整度</b>——六关全过值得骄傲，但它不是你的真实结局的资格证明；真实结局以上面「当前结局」为准，两边互不卡对方。</div>
     </div>
     <div class="toolbar" style="justify-content:center">
       <button class="ghost" onclick="downloadJSON()">导出我的进度（JSON）</button>
@@ -1495,11 +1496,11 @@ function renderWisdom(){
       if(t&&keys[id]&&keys[id].trim())turns+=row('<b>'+esc(t.a)+'</b>',esc(keys[id])+'　'+chip(p.name));});});
   sec('⭐ 关键转折库','你认过账的转折点：动作 ↔ 幸亏——读几遍，你就知道自己靠什么成事',turns);
 
-  /* 情绪恢复记录 */
+  /* 情绪卡记录: 动作状态≠恢复效果,没记录效果就不替用户判断效果(R08) */
   const rescues=all.flatMap(p=>p.st.tasks.filter(t=>t.st==='s4'&&t.mood).map(t=>({...t,from:p.name})));
-  sec('🫀 情绪恢复记录','你崩的时候都是靠什么缓过来的——"没做完"的招效果未知，自己掂量',
-    rescues.map(t=>row('<b>'+esc(t.mood)+'</b>'+(t.done?' <span style="color:var(--ok)">✅ 做完了</span>':' <span style="color:var(--muted)">没做完·效果未知</span>')
-      +'<div style="font-size:11.5px;color:var(--muted)">用的招：'+esc(t.a)+'</div>',chip(t.from))).join(''));
+  sec('🫀 情绪卡记录','你崩的时候写过的话、用过的招。<b>做完动作 ≠ 已经恢复</b>：没记录效果的，这里不替你把关效果，效果要自己掂量',
+    rescues.map(t=>row('<b>'+esc(t.mood)+'</b>'+(t.done?' <span style="color:var(--muted)">动作做完了</span>':' <span style="color:var(--muted)">动作没做完</span>')
+      +'<div style="font-size:11.5px;color:var(--muted)">用的招：'+esc(t.a)+'　｜　效果没有记录，不作判断</div>',chip(t.from))).join(''));
 
   /* 最有效一招库 */
   const bests=all.filter(p=>p.st.goal&&p.st.goal.s5&&p.st.goal.s5.best&&p.st.goal.s5.best.trim())
