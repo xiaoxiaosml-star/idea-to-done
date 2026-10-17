@@ -205,6 +205,9 @@
           <input type="text" id="eEvidence">
           <label>备注（可选）</label>
           <input type="text" id="eNote">
+          <label>来源计划版本</label>
+          <select id="ePlanVer"></select>
+          <div class="sub" style="margin-top:2px">补记旧计划下的执行时，在这里选历史版本；不选则记到当前计划。已归档版本只能补记，不会改历史。</div>
           <div class="toolbar">
             <button class="primary" onclick="saveExec()">记下这条结果</button>
           </div>
@@ -317,7 +320,7 @@ function go(v){
  * render() 每次渲染后把草稿回填表单: 你正在写的内容不被任何渲染/响应冲掉。 */
 const DRAFT_DEFS={
   discuss:{fields:['wInput']},
-  exec:{fields:['eAction','eInput','eResult','eEvidence','eNote']},
+  exec:{fields:['eAction','eInput','eResult','eEvidence','eNote','ePlanVer']},
   plan:{fields:['pfQuestion','pfAction','pfAccept','pfContinueSignal','pfBudget','pfBudgetMoney','pfBudgetTime','pfStop','pfEvidence'],check:'pfTool'}
 };
 let curDrafts=null;
@@ -374,6 +377,7 @@ Object.keys(DRAFT_DEFS).forEach(k=>{
   def.fields.forEach(f=>{
     const el=document.getElementById(f);
     el&&el.addEventListener('input',()=>{if(cur&&curDrafts)curDrafts[k]=readDraftForm(k);});
+    el&&el.addEventListener('change',()=>{if(cur&&curDrafts)curDrafts[k]=readDraftForm(k);});  /* select类控件 */
   });
   const c=def.check&&document.getElementById(def.check);
   c&&c.addEventListener('change',()=>{if(cur&&curDrafts)curDrafts[k]=readDraftForm(k);});
@@ -484,8 +488,10 @@ function renderPanel(p){
 function exHasReal(e){return !!((e.result||'').trim()||(e.evidence||'').trim());}
 function tvHasReal(t){
   const inp=t.inputs||{};
+  /* 与服务端 trialHasReal 同口径(N2): 实测数字(r1-r9,合法0算)或结果数字记录(c2)才算实测;
+   * 动作(c1)/结论(c3)等文字不能单独冒充实测。 */
   return ['r1','r2','r3','r4','r5','r6','r7','r8','r9'].some(k=>inp[k]!==null&&inp[k]!==undefined&&inp[k]!=='')
-    ||['c1','c2','c3'].some(k=>typeof inp[k]==='string'?inp[k].trim()!=='':(inp[k]!==null&&inp[k]!==undefined));
+    ||(typeof inp.c2==='string'?inp.c2.trim()!=='':(inp.c2!==null&&inp.c2!==undefined));
 }
 function renderResult(p){
   const exN=p.executions.length, tvN=(p.trials||[]).length;
@@ -590,10 +596,24 @@ function renderPlan(p){
   document.getElementById('pfTool').checked=src.tool==='trial';
 }
 function renderExec(p){
+  /* 来源版本控件(N1): 当前已确认计划 + 历史留档版本都可选; 都没有时隐藏。
+   * 草稿在 render() 末尾统一回填,用户手选的来源版本随草稿按事项保留。 */
+  const sel=document.getElementById('ePlanVer');
+  const curPlan=(p.plan&&p.plan.status==='confirmed')?p.plan:null;
+  const hist=p.planHistory||[];
+  if(!curPlan&&!hist.length){sel.style.display='none';}
+  else{
+    sel.style.display='';
+    sel.innerHTML=(curPlan?'<option value="'+curPlan.version+'">v'+curPlan.version+' · 当前计划</option>':'')
+      +hist.map(h=>'<option value="'+h.version+'">v'+h.version+' · 历史（'+(h.archiveReason||'已替换')+'）</option>').join('');
+    /* 默认当前计划; 用户手选值由 render() 末尾的草稿回填恢复(N1),这里不做 prev 保留,
+     * 否则清草稿后下拉框会停在旧选择上,误把补记记进历史版本。 */
+    sel.value=curPlan?String(curPlan.version):(hist.length?String(hist[hist.length-1].version):'');
+  }
   const el=document.getElementById('wExecList');
   if(!p.executions.length){el.innerHTML='<div class="empty">还没有执行记录。做完一条，就把真实结果记在这里。</div>';return;}
   el.innerHTML=p.executions.map(e=>`<div class="exitem"><div class="ea">${esc(e.action)}</div>
-    <div class="em">${e.at.slice(0,16).replace('T',' ')} ｜ 投入:${esc(e.input)||'—'}</div>
+    <div class="em">${e.at.slice(0,16).replace('T',' ')} ｜ 来源[计划v${e.planVersion||0}] ｜ 投入:${esc(e.input)||'—'}</div>
     ${e.result?`<div style="font-size:13px;margin-top:4px">结果:${esc(e.result)}</div>`:''}
     ${e.evidence?`<div class="ev">证据:${esc(e.evidence)}</div>`:''}
     ${e.note?`<div class="em">备注:${esc(e.note)}</div>`:''}</div>`).join('');
@@ -784,7 +804,7 @@ async function saveTrial(){
   }
   busy(true);
   try{
-    const d=await api('/api/projects/'+cur.id+'/trials',{base:curBase,inputs,planVersion:pv},{},{pid:cur.id});
+    const d=await api('/api/projects/'+cur.id+'/trials',{base:curBase,inputs,planVersion:pv},undefined,{pid:cur.id});
     if(cur&&cur.id===d.project.id){cur=d.project;curBase=cur.version;render();}
     const pl=d.trial.lines.find(l=>l.indexOf('净利')>0);
     toast(pl?'验证单已保存（计划v'+d.trial.planVersion+'）：净利 '+pl.split('净利 ')[1].split(' 元')[0]+' 元，复盘时 Skill 会读到':'验证单已保存（计划v'+d.trial.planVersion+'，利润账未填齐），复盘时 Skill 会读到');
@@ -803,7 +823,7 @@ TV_IDS.forEach(k=>document.getElementById(TV_EL[k]).addEventListener('input',()=
 /* 会话失效恢复(R05): 用户确认后依据本事项记录重建会话并原样重发一次;
  * 只有用户点确认才重试,不盲目重复计费。 */
 async function rebuildSessionAndRetry(pid,retry){
-  if(!confirm('和 AI 的对话会话已失效。\n要依据本事项的记录（已确认计划、历史版本、全部证据）重建会话，并把刚才那句话重发一次吗？'))
+  if(!confirm('和 AI 的对话会话已失效。\n要依据本事项的记录（讨论记录与你说过的约束、已确认计划、历史版本、全部证据）重建会话，并把刚才那句话重发一次吗？'))
     return;
   busy(true);
   try{
@@ -818,12 +838,19 @@ async function sendMessage(preset){
   const el=document.getElementById('wInput');
   const t=(preset!==undefined?preset:el.value).trim();
   if(!t){toast('先写点什么');return;}
-  const pid=cur.id,base=curBase,sentRaw=el.value;
+  await sendMessageTo(cur.id,t);
+}
+/* 发往指定事项的消息路径: 全程只认传入的 pid,不读全局 cur(B4复审)——
+ * 会话重建后重发、切换事项后的晚到响应,都不会把 A 的话记进 B。 */
+async function sendMessageTo(pid,text,_retried){
+  const el=document.getElementById('wInput');
+  const base=cur&&cur.id===pid?curBase:undefined;
+  const sentRaw=el?el.value:'';
   busy(true);
   try{
-    await api('/api/projects/'+pid+'/messages',{text:t,base:base},undefined,{pid});
+    await api('/api/projects/'+pid+'/messages',{text,base},undefined,{pid});
     const d=await api('/api/projects/'+pid,null,'GET',{pid});
-    /* 响应只属于发起时的事项: 已切走就不替换当前页面/草稿,结果仍存 A(R02) */
+    /* 响应只属于发起时的事项: 已切走就不替换当前页面/草稿,结果仍存原事项(R02) */
     if(cur&&cur.id===pid){
       cur=d.project;curBase=cur.version;render();
       /* 成功只清除"已提交那一版": 等待期间补写的内容原样保留(R02/T08) */
@@ -832,7 +859,10 @@ async function sendMessage(preset){
       else toast('你等待期间补写的内容已保留');
     }
   }catch(e){
-    if(e&&e.sessionLost&&cur&&cur.id===pid)await rebuildSessionAndRetry(pid,()=>sendMessage(t));
+    /* 只有用户本人停留在发起事项并点确认才重试; 重试仍发往原 pid;
+     * _retried防环: 重建后那次重发若再失败,只提示,不再自动重建重发(B4复审)。 */
+    if(e&&e.sessionLost&&cur&&cur.id===pid&&!_retried)await rebuildSessionAndRetry(pid,()=>sendMessageTo(pid,text,true));
+    else if(e&&e.sessionLost&&_retried)toast('重建后重发仍失败，请稍后再试，内容已保留');
   }
   busy(false);
 }
@@ -874,21 +904,25 @@ async function saveDraft(){
   busy(false);
 }
 async function saveExec(){
-  const body={action:document.getElementById('eAction').value,input:document.getElementById('eInput').value,
-    result:document.getElementById('eResult').value,evidence:document.getElementById('eEvidence').value,
-    note:document.getElementById('eNote').value,base:curBase};
+  /* 快照一律按 DOM id 捕获(N3复审): 提交前后比较的是同一批 id,不漏清也不误清;
+   * 只有输入仍等于已提交那版才清空,等待期间的新补充保留。 */
+  const ids=['eAction','eInput','eResult','eEvidence','eNote'];
+  const snap={};ids.forEach(f=>{snap[f]=document.getElementById(f).value;});
+  const body={action:snap.eAction,input:snap.eInput,result:snap.eResult,evidence:snap.eEvidence,
+    note:snap.eNote,base:curBase};
+  const pvRaw=(document.getElementById('ePlanVer')||{}).value;
+  if(pvRaw!==undefined&&pvRaw!=='')body.planVersion=Number(pvRaw);   /* 来源版本: 只认当前或历史留档(N1) */
   if(!body.action.trim()){toast('写一下这条记录对应的动作');return;}
-  const snap={...body},pid=cur.id;
+  const pid=cur.id;
   busy(true);
   try{
     const d=await api('/api/projects/'+pid+'/executions',body,undefined,{pid});
     if(cur&&cur.id===pid){
       cur=d.project;curBase=cur.version;render();
-      const ids=['eAction','eInput','eResult','eEvidence','eNote'];
-      /* 只清掉与提交快照一致的内容;等待期间的补写保留(R02/T08) */
       if(ids.every(f=>sameAs(document.getElementById(f),snap[f]))){
         ids.forEach(f=>document.getElementById(f).value='');
         clearDraft('exec');
+        renderExec(cur);      /* 来源版本回到"当前计划"默认,不留在旧的历史选择上 */
       }else toast('你等待期间补写的内容已保留');
       toast('已记录。证据够了就点「带着结果继续讨论」');
     }
@@ -896,7 +930,11 @@ async function saveExec(){
   busy(false);
 }
 async function doReview(){
-  const pid=cur.id,base=curBase;
+  await doReviewFor(cur.id);
+}
+/* 复盘也按显式 pid 走(B4复审): 重建重试不会落到切换后的当前事项上。 */
+async function doReviewFor(pid,_retried){
+  const base=cur&&cur.id===pid?curBase:undefined;
   busy(true);
   try{
     const r=await api('/api/projects/'+pid+'/review',{base:base},undefined,{pid});
@@ -907,7 +945,8 @@ async function doReview(){
     }
   }catch(e){
     if(e&&e.hint)toast(e.hint);
-    if(e&&e.sessionLost&&cur&&cur.id===pid)await rebuildSessionAndRetry(pid,doReview);
+    if(e&&e.sessionLost&&cur&&cur.id===pid&&!_retried)await rebuildSessionAndRetry(pid,()=>doReviewFor(pid,true));
+    else if(e&&e.sessionLost&&_retried)toast('重建后复盘仍失败，请稍后再试');
   }
   busy(false);
 }
@@ -930,13 +969,12 @@ async function decide(type){
 let methodLoaded=false;
 let curMethodPath=null;
 const METHOD_PATH_OK=rel=>/^(chapters\/[^/]+\.md|deep-dive\/handbook\/[^/]+\.md|deep-dive\/tools\/[^/]+\.md|deep-dive\/cases\/[^/]+\/[^/]+\.md|cases\/[^/]+\.md|tools\/README\.md)$/.test(rel);
-function resolveMdLink(h){
+function resolveMdLinkFrom(h,baseDir){
   const target=h.split('#')[0];
   if(/^[a-z][a-z0-9+.-]*:/i.test(target))return null;          /* 外链/协议交给外链逻辑 */
   if(!/\.(md|html)$/i.test(target))return null;
-  const baseDir=curMethodPath?curMethodPath.split('/').slice(0,-1).join('/'):'';
   const out=[];
-  for(const seg of (baseDir+'/'+target).split('/')){
+  for(const seg of (baseDir?baseDir+'/'+target:target).split('/')){
     if(!seg||seg==='.')continue;
     if(seg==='..'){out.pop();continue;}
     out.push(seg);
@@ -945,10 +983,19 @@ function resolveMdLink(h){
   if(/\.html$/i.test(rel))return /^tools\/[\w一-鿿-]+\.html$/i.test(rel)?{tool:rel.slice(6)}:null;
   return METHOD_PATH_OK(rel)?{md:rel}:null;
 }
+function resolveMdLink(h){
+  const baseDir=curMethodPath?curMethodPath.split('/').slice(0,-1).join('/'):'';
+  return resolveMdLinkFrom(h,baseDir);
+}
 function mdInline(s,inlines){
   s=esc(s);
-  s=s.replace(/(\d+)/g,(_,i)=>'<code style="background:#efe8db;border-radius:4px;padding:1px 6px;font-size:12.5px">'+esc(inlines[+i])+'</code>');
-  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/(\d+)/g,(_,i)=>{
+    const code=inlines[+i-1];
+    const r=resolveMdLink(code)||(/^tools\//.test(code)?resolveMdLinkFrom(code,'deep-dive'):null);
+    if(r&&r.md)return '<a onclick="loadMethodByPath(\''+r.md+'\')">'+esc(code)+'</a>';
+    if(r&&r.tool)return '<a href="/tool/'+encodeURIComponent(r.tool)+'" target="_blank" rel="noopener">'+esc(code)+'</a>';
+    return '<code style="background:#efe8db;border-radius:4px;padding:1px 6px;font-size:12.5px">'+esc(code)+'</code>';
+  });  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
   s=s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,(m,t,h)=>{
     if(/^https?:\/\//i.test(h))return '<a href="'+esc(h)+'" target="_blank" rel="noopener">'+t+'</a>';
     const r=resolveMdLink(h);

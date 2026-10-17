@@ -35,6 +35,19 @@ const DATA_FP=crypto.createHash('sha1').update(DATA).digest('hex').slice(0,12);
 const LOCK_FILE=path.join(DATA,'.writer.lock');
 const lockNonce=crypto.randomBytes(8).toString('hex');
 const lockContent=()=>{try{return JSON.parse(fs.readFileSync(LOCK_FILE,'utf8'));}catch(_){return null;}};
+/* Windows 上对有短暂未关闭句柄的目标做 rename 会 EPERM(如另一进程刚读过、杀软扫描),
+ * 属于毫秒级瞬态。统一带重试的原子替换: 重试仍失败才抛,调用方各按原子性语义处理。 */
+function renameWithRetry(src,dst,tries,gap){
+  tries=tries||6;gap=gap||120;
+  let last=null;
+  for(let i=0;i<tries;i++){
+    try{fs.renameSync(src,dst);return;}
+    catch(e){last=e;if(i<tries-1){
+      const t=Date.now();while(Date.now()-t<gap);   /* 同步等待瞬态句柄释放, 不长于~1s */
+    }}
+  }
+  throw last;
+}
 const pidAlive=p=>{if(!p||!Number.isInteger(p))return false;try{process.kill(p,0);return true;}catch(e){return e.code==='EPERM';}};
 function probeHealth(pt){
   return new Promise(res=>{
@@ -75,15 +88,52 @@ async function acquireLock(){
           +'/，实例 '+c.iid+')，只是锁里的 pid 记录已失真；不夺锁。本实例已退出，未读写任何数据。');
         return false;
       }
-      const cur=lockContent();                        /* 回收前再读一次: 确认锁没换手 */
-      if(!cur||cur.nonce!==c.nonce)continue;
+      /* 残留锁回收也要互斥提交(B1复审): 用一个回收许可文件(openSync 'wx' 原子创建,同 mkdir)。
+       * 读到许可但身份缺失/不可读=别人正在占用(创建与写入之间的微窗口),绝不当残留删——
+       * 只删"JSON完整且pid已死"的真残留(顺带30s老化兜底创建后崩溃的空白许可)。
+       * 拿到许可后再重读 nonce 确认锁没换手,替换后再验证锁确实归自己,否则放弃。 */
+      const CLAIM_FILE=LOCK_FILE+'.claim';
+      const claimContent=()=>{try{return JSON.parse(fs.readFileSync(CLAIM_FILE,'utf8'));}catch(_){return null;}};
+      const claimStale=()=>{try{return Date.now()-fs.statSync(CLAIM_FILE).mtimeMs>30000;}catch(_){return false;}};
+      const takeClaim=()=>{
+        for(let retry=0;retry<2;retry++){
+          let fd=null;
+          try{
+            fd=fs.openSync(CLAIM_FILE,'wx');
+            fs.writeFileSync(fd,JSON.stringify({pid:process.pid,at:new Date().toISOString()}));
+            fs.closeSync(fd);
+            return true;
+          }catch(e){
+            if(fd!==null){try{fs.closeSync(fd);}catch(_){}}
+            if(e.code!=='EEXIST')return false;
+            const cc=claimContent();
+            if(cc&&pidAlive(cc.pid))return false;        /* 有别的进程正在回收,让给它 */
+            if(!cc&&!claimStale())return false;          /* 占用中(写入微窗口/未知),不抢 */
+            try{fs.unlinkSync(CLAIM_FILE);}catch(_){return false;}   /* 真残留才清 */
+          }
+        }
+        return false;
+      };
+      const dropClaim=()=>{try{fs.unlinkSync(CLAIM_FILE);}catch(_){}};
+      if(!takeClaim()){
+        console.error('[成事工坊] 另一个实例正在回收这把崩溃残留锁，本实例退出，未读写任何数据。');
+        return false;
+      }
       try{
+        const cur=lockContent();                      /* 持有回收许可后再核实: 锁没换手才替换 */
+        if(!cur||cur.nonce!==c.nonce)return false;    /* 已由别人收走, 直接退出重试循环 */
         const tmp=LOCK_FILE+'.'+process.pid;
         fs.writeFileSync(tmp,JSON.stringify(payload));
-        fs.renameSync(tmp,LOCK_FILE);                 /* 原子替换;持有者已核实退出 */
+        renameWithRetry(tmp,LOCK_FILE);               /* 原子替换;持有者已核实退出 */
+        const now=lockContent();                      /* 替换后再验证: 锁确实归本进程 */
+        if(!now||now.nonce!==lockNonce)return false;  /* 极端交错:别人后写覆盖,放弃不当写者 */
         console.log('[成事工坊] 已回收崩溃残留的数据目录锁(持有者进程不存在且无匹配服务应答)。');
         return true;
-      }catch(_){return false;}
+      }catch(err){
+        console.error('[成事工坊] 回收残留锁时写入失败，本实例退出，未读写任何数据。('+String(err&&err.message||err)+')');
+        return false;
+      }
+      finally{dropClaim();}
     }
   }
   console.error('[成事工坊] 无法取得数据目录写权限(锁核实重试耗尽)，本实例退出，未读写任何数据。');
@@ -95,7 +145,7 @@ function updateLockPort(){
     try{
       const tmp=LOCK_FILE+'.'+process.pid;
       fs.writeFileSync(tmp,JSON.stringify({...c,port}));
-      fs.renameSync(tmp,LOCK_FILE);
+      renameWithRetry(tmp,LOCK_FILE);
     }catch(_){}
   }
 }
@@ -142,7 +192,7 @@ function saveProject(p){
   p.updatedAt=new Date().toISOString();
   const f=pid(p.id),tmp=f+'.tmp-'+process.pid+'-'+crypto.randomBytes(2).toString('hex');
   fs.writeFileSync(tmp,JSON.stringify(p,null,2),'utf8');
-  fs.renameSync(tmp,f);                        /* 原子替换,失败时旧文件仍在 */
+  renameWithRetry(tmp,f);                      /* 原子替换,失败时旧文件仍在 */
   return p;
 }
 function listProjects(){
@@ -209,8 +259,18 @@ function contextBlock(p){
     }).join('\n'));
   }
   if(p.decision)L.push('【当前结局决定】'+({done:'达成',go:'继续验证',pause:'暂停',stop:'终止'})[p.decision.type]+'：'+p.decision.reason);
+  if(p.discussion&&p.discussion.length){
+    /* 讨论历史进上下文(B4复审): 重建/续谈都以它捡起用户明说过的约束(如时间限制、边界),
+     * 不静默丢。用户消息全量带; AI 回复截断到头部, 超长只带最近一段, 防止提示词膨胀。 */
+    const msgs=p.discussion;
+    const tail=msgs.length>30?msgs.slice(msgs.length-30):msgs;
+    L.push('【讨论记录(用户说过的话全部算数,尤其是明确约束,继续讨论必须全部遵守)】\n'+tail.map(m=>
+      (m.role==='user'?'用户：':'AI：')+(m.role==='user'?String(m.text):String(m.text).slice(0,400))).join('\n'));
+  }
   if(p.planHistory&&p.planHistory.length)
-    L.push('【历史计划版本(仅留档,均不再执行)】'+p.planHistory.map(h=>'v'+h.version+'（'+(h.archiveReason||'已替换')+'，止于 '+String(h.archivedAt||'').slice(0,10)+'）').join('；'));
+    L.push('【历史计划版本(仅留档,均不再执行)】\n'+p.planHistory.map(h=>
+      'v'+h.version+'（'+(h.archiveReason||'已替换')+'，止于 '+String(h.archivedAt||'').slice(0,10)+'）'
+      +'\n要验证：'+(h.question||'未填')+'｜动作：'+(h.action||'未填')+'｜停止条件：'+(h.stop||'未填')).join('\n'));
   return L.join('\n\n');
 }
 const CONTRACT=`【运行环境】你在「成事工坊」本地工作台里被调用，讨论只围绕上面这一件事。不要使用或读取任何个人记忆文件；需要方法细节时，只读安装目录下的 chapters/、deep-dive/、tools/（已授权）。
@@ -229,14 +289,15 @@ function discussPrompt(p,userText){
       :'这是本事项的开场讨论。先澄清事实、假设、未知项与投入边界；信息不足以出计划时，问当前最影响判断的问题（不超过3个）；足够时直接给计划草案。');
 }
 function execHasReal(e){return !!(e&&(e.result&&e.result.trim())||(e.evidence&&e.evidence.trim()));}
-/* 验证单算实测证据(R06): 区分准备、实际行动、观察到的结果。
+/* 验证单算实测证据(R06/N2复审): 区分准备、实际行动、观察到的结果。
  * 任一实测字段(r1-r9)已填即算——合法的 0 单/0 收入也是观察,不用真假值把 0 当没填;
- * 只填动作(c1"明天准备去做")或事前条件(q1-q4)不算实测;结果数字(c2)/结论(c3)算。 */
+ * 只填动作(c1"明天准备去做")或事前条件(q1-q4)不算实测;结果数字(c2)算;
+ * 结论/下一步(c3)只是判断文字,不能单独等价于观察到的结果(N2)。 */
 function trialHasReal(t){
   if(!t)return false;
   if(t.nums&&['r1','r2','r3','r4','r5','r6','r7','r8','r9'].some(k=>t.nums[k]!==null&&t.nums[k]!==undefined))return true;
   const q=t.inputs||{};
-  return !!((q.c2&&String(q.c2).trim())||(q.c3&&String(q.c3).trim()));
+  return !!(q.c2&&String(q.c2).trim());
 }
 function reviewPrompt(p){
   /* 统一证据时间线: 执行记录与验证单都能发起复盘, 以最新一条为本次复盘对象 */
@@ -590,8 +651,9 @@ const server=http.createServer(async(req,res)=>{
         }finally{aiBusy[id]=false;}
       }
 
-      /* 会话失效后的显式重建(R05): 用户确认后清空 sessionId,下一次调用以 contextBlock 里的
-       * 已确认计划/历史版本/全部证据开新会话,不静默丢约束;不替用户发起任何模型调用。 */
+      /* 会话失效后的显式重建(R05/B4复审): 用户确认后清空 sessionId,下一次调用以
+       * contextBlock 里的讨论记录(用户明说约束全量带)、已确认计划、历史计划正文和全部证据
+       * 开新会话,不静默丢约束;不替用户发起任何模型调用。 */
       if(parts[3]==='session'&&parts[4]==='rebuild'&&req.method==='POST'){
         const result=await withLock(id,()=>{
           const F=loadProject(id);
