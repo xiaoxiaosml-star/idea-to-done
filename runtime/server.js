@@ -103,72 +103,119 @@ async function acquireLock(){
        *     身份缺失且文件很新(<2s, 创建与写身份之间的微窗口)=按占用让别人; 死pid许可忽略;
        *  3) 赢后(替换+验主成功)才清理: 只删已验证死掉的别人的许可和自己的许可,
        *     释放(exit路径)也只删内容仍归自己的那一份, 绝不无条件删别人的。
-       * 拿许可后再重读 nonce 确认锁没换手,替换后再验证锁确实归自己,否则放弃。 */
+       * 拿许可后再重读 nonce 确认锁没换手,替换后再验证锁确实归自己,否则放弃。
+       * F1三轮复验: 全部故障路径拒写(fail-closed)——许可创建/写身份/关闭任一步失败=本次
+       * 取许可失败; 目录扫描失败=无法核实,绝不当作"空目录干净"; 读他人许可报权限/IO错=
+       * 无法核实对方身份,按占用让别人,不因文件年龄>2s就当成已死半成品; GC同样只删"读到
+       * 且核实"的许可,读不出来的宁可不删也不误删活许可。 */
       const CLAIM_PREFIX='.writer.lock.claim';
       const myClaim=path.join(DATA,CLAIM_PREFIX+'.'+process.pid+'-'+crypto.randomBytes(3).toString('hex'));
       const myClaimNonce=crypto.randomBytes(6).toString('hex');
-      const readClaim=f=>{try{return JSON.parse(fs.readFileSync(f,'utf8'));}catch(_){return null;}};
-      const claimFresh=f=>{try{return Date.now()-fs.statSync(f).mtimeMs<2000;}catch(_){return false;}};
+      const ENOENT_CODE='ENOENT';
+      /* readRaw: undefined=文件已不存在; null=读取失败(权限/IO,无法核实); 字符串=读到内容 */
+      const readRaw=f=>{try{return fs.readFileSync(f,'utf8');}catch(e){return (e&&e.code===ENOENT_CODE)?undefined:null;}};
+      const parseClaim=raw=>{let cc=null;try{cc=JSON.parse(raw);}catch(_){cc=null;}return cc;};
       const scanOnce=()=>{
-        let entries=[];
-        try{entries=fs.readdirSync(DATA);}catch(_){}
+        let entries=null;
+        try{entries=fs.readdirSync(DATA);}catch(_){return null;}   /* null=无法核实,绝不当作空目录 */
         for(const f of entries){
           if(f===path.basename(myClaim))continue;
           if(!f.startsWith(CLAIM_PREFIX))continue;
           const full=path.join(DATA,f);
-          const cc=readClaim(full);
+          const raw=readRaw(full);
+          if(raw===undefined)continue;                 /* 对方已撤,无碍 */
+          if(raw===null)return false;                  /* 读失败=无法核实对方身份,按占用让别人(与年龄无关) */
+          const cc=parseClaim(raw);
           if(cc&&Number.isInteger(cc.pid)){
-            if(pidAlive(cc.pid))return false;              /* 有活回收者,让 */
-            continue;                                      /* 死许可忽略,赢后GC */
+            if(pidAlive(cc.pid))return false;          /* 有活回收者,让 */
+            continue;                                  /* 已核实死许可忽略,赢后GC */
           }
-          if(claimFresh(full))return false;                /* 写入微窗口,让 */
+          /* 身份不完整: 只有stat也成功才允许按年龄判断; stat失败=无法核实 */
+          let fresh=true;
+          try{fresh=Date.now()-fs.statSync(full).mtimeMs<2000;}catch(_){return false;}
+          if(fresh)return false;                       /* 写入微窗口,让 */
+          /* 老化半成品(读得出但身份缺): 创建者活着几毫秒内就写完身份,写不完的=已死,按残留忽略 */
+        }
+        return true;
+      };
+      /* 占位+写身份+关闭 任一步失败=本次取许可失败; 只安全撤销自己的半成品 */
+      const createMyClaim=()=>{
+        let fd=null;
+        try{fd=fs.openSync(myClaim,'wx');}catch(_){return false;}
+        try{fs.writeFileSync(fd,JSON.stringify({pid:process.pid,nonce:myClaimNonce,at:new Date().toISOString()}));}
+        catch(_){try{fs.closeSync(fd);}catch(_){} try{fs.unlinkSync(myClaim);}catch(_){} return false;}
+        try{fs.closeSync(fd);}catch(_){try{fs.unlinkSync(myClaim);}catch(_){} return false;}
+        /* 成功取许可前确认自己的文件和身份确实建立(回读验证) */
+        const chk=parseClaim(readRaw(myClaim));
+        if(!chk||chk.nonce!==myClaimNonce||chk.pid!==process.pid){
+          try{fs.unlinkSync(myClaim);}catch(_){}
+          return false;
         }
         return true;
       };
       const takeClaim=()=>{
         /* 每次扫描都现读目录(F1复验教训: 预读快照会让双方互看不见);
          * 连扫两遍(间隔150ms)。安全性: 双方都是"先建自己的许可再扫",后扫的一方必能看见
-         * 先建方的活pid,故不可能双方同过。撞见别人=撤自己的占位、退避后重试(有界),
-         * 而不是双双放弃——赢方几毫秒内就会收完锁撤许可,输方重试时会在锁核实处自然退出。 */
-        for(let attempt=0;attempt<6;attempt++){
-          try{
-            const fd=fs.openSync(myClaim,'wx');
-            fs.writeFileSync(fd,JSON.stringify({pid:process.pid,nonce:myClaimNonce,at:new Date().toISOString()}));
-            fs.closeSync(fd);
-          }catch(_){}
-          let clean=scanOnce();
-          if(clean){
-            const t=Date.now();while(Date.now()-t<150);
-            clean=scanOnce();
+         * 先建方的活pid,故不可能双方同过。撞见别人/无法核实=撤自己的占位、退避后重试(有界),
+         * 而不是双双放弃——赢方几毫秒内就会收完锁撤许可,输方重试时会在锁核实处自然退出。
+         * 退避带随机抖动: 同刻启动的两个实例步进完全相同,固定退避会相位锁死双双重试耗尽
+         * (实测6轮B1/F1出现0写者活锁);抖动让双方逐步错开,一次干净扫描即分胜负。
+         * 创建/扫描故障记 reason='fault': 最终失败时报"未取得写权限",与"有竞争者"区分。 */
+        const jitter=n=>Math.floor(Math.random()*n);
+        const pj=Date.now();while(Date.now()-pj<jitter(120));
+        let reason='busy';
+        for(let attempt=0;attempt<8;attempt++){
+          if(!createMyClaim()){reason='fault';}
+          else{
+            let clean=scanOnce();
+            if(clean===true){
+              const t=Date.now();while(Date.now()-t<150);
+              clean=scanOnce();
+            }
+            if(clean===true)return {ok:true};
+            if(clean===null)reason='fault';
           }
-          if(clean)return true;
-          try{fs.unlinkSync(myClaim);}catch(_){}          /* 撤自己的占位 */
-          const wait=250+attempt*150;                      /* 退避, 上限~1s */
+          try{fs.unlinkSync(myClaim);}catch(_){}        /* 撤自己的占位 */
+          const wait=250+attempt*200+jitter(300);        /* 退避+抖动, 上限~2s/次 */
           const tw=Date.now();while(Date.now()-tw<wait);
         }
-        return false;
+        return {ok:false,reason};
       };
       const dropClaim=onlyMine=>{
         try{
-          const c=readClaim(myClaim);
-          if(onlyMine&&(!c||c.nonce!==myClaimNonce||c.pid!==process.pid))return;  /* 不归我,不碰 */
+          const c=parseClaim(readRaw(myClaim));
+          if(onlyMine&&(!c||c.nonce!==myClaimNonce||c.pid!==process.pid))return;  /* 不归我/读不出=不碰 */
           fs.unlinkSync(myClaim);
         }catch(_){}
       };
       const gcDeadClaims=()=>{
-        let claimsDir=[];
-        try{claimsDir=fs.readdirSync(DATA);}catch(_){}
+        let claimsDir=null;
+        try{claimsDir=fs.readdirSync(DATA);}catch(_){return;}   /* GC失败宁可不清,绝不误删 */
         for(const f of claimsDir){
           if(!f.startsWith(CLAIM_PREFIX))continue;
           const full=path.join(DATA,f);
           if(full===myClaim)continue;
-          const cc=readClaim(full);
-          if(cc&&Number.isInteger(cc.pid)&&pidAlive(cc.pid))continue;   /* 活的绝不碰 */
-          try{fs.unlinkSync(full);}catch(_){}                           /* 只清已验证的死许可 */
+          const raw=readRaw(full);
+          if(raw===undefined)continue;                 /* 已消失 */
+          if(raw===null)continue;                      /* 读失败=无法核实,绝不删 */
+          const cc=parseClaim(raw);
+          if(cc&&Number.isInteger(cc.pid)){
+            if(pidAlive(cc.pid))continue;              /* 活的绝不碰 */
+            try{fs.unlinkSync(full);}catch(_){}         /* 只删读到且核实已死的许可 */
+            continue;
+          }
+          /* 身份不完整: 只有确实读到且 aged(>2s) 才清; stat失败=不删 */
+          let age=null;
+          try{age=Date.now()-fs.statSync(full).mtimeMs;}catch(_){continue;}
+          if(age>=2000){try{fs.unlinkSync(full);}catch(_){}}
         }
       };
-      if(!takeClaim()){
-        console.error('[成事工坊] 另一个实例正在回收这把崩溃残留锁，本实例退出，未读写任何数据。');
+      const claim=takeClaim();
+      if(!claim.ok){
+        if(claim.reason==='fault')
+          console.error('[成事工坊] 回收许可创建或核验失败(存储错误)，无法确认数据目录独占，本实例退出，未读写任何数据。');
+        else
+          console.error('[成事工坊] 另一个实例正在回收这把崩溃残留锁，本实例退出，未读写任何数据。');
         return false;
       }
       let won=false;
