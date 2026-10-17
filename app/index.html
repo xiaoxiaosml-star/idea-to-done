@@ -63,7 +63,8 @@
   .proj .pm{font-size:12px;color:var(--muted);margin-top:3px}
   .mlist button{display:block;width:100%;text-align:left;margin-bottom:6px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;font-family:inherit}
   .mlist button.on{border-color:var(--wood);color:var(--wood);font-weight:600}
-  pre.md{white-space:pre-wrap;font-size:13.5px;line-height:1.8;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;max-height:60vh;overflow:auto}
+  pre.md,.md{white-space:pre-wrap;font-size:13.5px;line-height:1.8;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;max-height:60vh;overflow:auto}
+  .md a{color:var(--wood);text-decoration:underline;cursor:pointer}
   .empty{color:var(--muted);font-size:13.5px;padding:26px 0;text-align:center}
   .decide-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   .decide-row button{flex:1;min-width:110px;font-size:12.5px;padding:8px 6px}
@@ -136,7 +137,7 @@
   <div id="v-methods" style="display:none">
     <div class="cols">
       <div class="card mlist" style="grid-column:1"><h2>目录</h2><div id="methodList"><div class="empty">加载中…</div></div></div>
-      <div class="card" style="grid-column:2"><h2 id="methodTitle">选一篇看</h2><pre class="md" id="methodBody">← 从左栏选择</pre></div>
+      <div class="card" style="grid-column:2"><h2 id="methodTitle">选一篇看</h2><div class="md" id="methodBody">← 从左栏选择</div></div>
     </div>
   </div>
 
@@ -277,7 +278,7 @@ let cur=null, curBase=0;
 
 function toast(t){const el=document.getElementById('toast');el.textContent=t;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',3600);}
 function busy(on){document.getElementById('busy').style.display=on?'flex':'none';}
-async function api(path,body,method){
+async function api(path,body,method,opts){
   let r;
   try{
     r=await fetch(path,{method:method||(body?'POST':'GET'),
@@ -289,8 +290,18 @@ async function api(path,body,method){
   }
   const d=await r.json().catch(()=>({error:'bad-response'}));
   if(r.status===401){toast('服务鉴权失败,请从启动器重新打开工作台');throw new Error('401');}
-  if(r.status===409){toast('数据有更新,已为你刷新');await openProject(cur.id);throw new Error('409');}
-  if(!r.ok){toast('出错：'+(d.detail||d.error||r.status));throw new Error(d.error||r.status);}
+  if(r.status===409){
+    toast(d.error==='ai-busy'?'这件事正在和 AI 对话中，等这轮说完再发':'数据有更新,已为你刷新');
+    /* 冲突/排队处理只针对发起请求的那个事项: 已切走就不替它刷新,不拿全局 cur 猜归属(R02) */
+    if(d.error!=='ai-busy'&&opts&&opts.pid&&cur&&cur.id===opts.pid)await openProject(opts.pid);
+    const e=new Error('409');e.aiBusy=d.error==='ai-busy';throw e;
+  }
+  if(!r.ok){
+    toast('出错：'+(d.detail||d.error||r.status));
+    const e=new Error(d.error||String(r.status));
+    e.detail=d.detail;e.sessionLost=!!d.sessionLost;e.project=d.project;e.hint=d.hint;
+    throw e;
+  }
   return d;
 }
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -300,6 +311,73 @@ function go(v){
   if(v==='list')loadList();
   if(v==='methods')loadMethods();
 }
+
+/* ---- 按事项草稿(R02): 讨论输入/执行表单/手写计划表单统一按事项隔离(localStorage),
+ * 与验证单草稿同一套纪律。切换事项前保存旧草稿,进入时恢复目标事项草稿。
+ * render() 每次渲染后把草稿回填表单: 你正在写的内容不被任何渲染/响应冲掉。 */
+const DRAFT_DEFS={
+  discuss:{fields:['wInput']},
+  exec:{fields:['eAction','eInput','eResult','eEvidence','eNote']},
+  plan:{fields:['pfQuestion','pfAction','pfAccept','pfContinueSignal','pfBudget','pfBudgetMoney','pfBudgetTime','pfStop','pfEvidence'],check:'pfTool'}
+};
+let curDrafts=null;
+const draftKeyOf=(pid,kind)=>'chengshi-draft:'+pid+':'+kind;
+function readDraftForm(kind){
+  const def=DRAFT_DEFS[kind],v={};
+  def.fields.forEach(f=>{v[f]=document.getElementById(f).value;});
+  if(def.check)v[def.check]=document.getElementById(def.check).checked;
+  return v;
+}
+function writeDraftForm(kind,v){
+  if(!v)return;
+  const def=DRAFT_DEFS[kind];
+  def.fields.forEach(f=>{if(v[f]!==undefined)document.getElementById(f).value=v[f];});
+  if(def.check&&v[def.check]!==undefined)document.getElementById(def.check).checked=!!v[def.check];
+}
+const draftHasContent=v=>v&&Object.keys(v).some(k=>typeof v[k]==='string'?v[k].trim()!=='':v[k]);
+function saveDrafts(){
+  if(!cur)return;
+  for(const k in DRAFT_DEFS){
+    const v=readDraftForm(k);
+    if(curDrafts)curDrafts[k]=v;
+    try{
+      if(draftHasContent(v))localStorage.setItem(draftKeyOf(cur.id,k),JSON.stringify(v));
+      else localStorage.removeItem(draftKeyOf(cur.id,k));
+    }catch(_){}
+  }
+}
+function loadDrafts(pid){
+  curDrafts={};
+  for(const k in DRAFT_DEFS){
+    try{
+      const s=localStorage.getItem(draftKeyOf(pid,k));
+      curDrafts[k]=s?JSON.parse(s):{};
+    }catch(_){curDrafts[k]={};}
+  }
+}
+function clearDraft(kind){
+  if(curDrafts)curDrafts[kind]={};
+  if(cur){try{localStorage.removeItem(draftKeyOf(cur.id,kind));}catch(_){}}
+}
+function applyDraftsToForms(){
+  if(!curDrafts)return;
+  for(const k in DRAFT_DEFS){
+    if(draftHasContent(curDrafts[k]))writeDraftForm(k,curDrafts[k]);
+    else if(k!=='plan'){                      /* 无草稿: 清空该类表单(plan类保留renderPlan的预填) */
+      const empty={};DRAFT_DEFS[k].fields.forEach(f=>empty[f]='');
+      writeDraftForm(k,empty);
+    }
+  }
+}
+Object.keys(DRAFT_DEFS).forEach(k=>{
+  const def=DRAFT_DEFS[k];
+  def.fields.forEach(f=>{
+    const el=document.getElementById(f);
+    el&&el.addEventListener('input',()=>{if(cur&&curDrafts)curDrafts[k]=readDraftForm(k);});
+  });
+  const c=def.check&&document.getElementById(def.check);
+  c&&c.addEventListener('change',()=>{if(cur&&curDrafts)curDrafts[k]=readDraftForm(k);});
+});
 
 /* ---- 开始页 ---- */
 async function startDiscuss(){await createProject('discuss');}
@@ -338,12 +416,14 @@ async function loadList(){
 
 /* ---- 工作页 ---- */
 async function openProject(id){
+  saveDrafts();           /* 切换前保留原事项未提交的三类草稿(讨论/执行/手写计划) */
   tvSaveDraft();          /* 切换前保留原事项未保存的验证单草稿 */
   tvUserOpen=null;        /* 折叠状态不跨事项携带, 按新事项适用性决定 */
   viewPanel=null;         /* 查看面板不跨事项携带, 按新事项阶段决定 */
   const d=await api('/api/projects/'+id);
   cur=d.project;curBase=cur.version;
-  curDraft=null;          /* 进入新事项时按事项恢复草稿 */
+  curDraft=null;          /* 进入新事项时按事项恢复验证单草稿 */
+  loadDrafts(id);         /* 恢复该事项的三类草稿 */
   go('work');
   render();
 }
@@ -360,6 +440,7 @@ function render(){
     +(p.decision?' ｜ 理由：'+esc(p.decision.reason):'');
   renderPlanSum(p);renderPanel(p);renderResult(p);
   renderDiscuss(p);renderPlan(p);renderExec(p);renderTrial(p);
+  applyDraftsToForms();   /* 草稿最后回填: 正在写的内容永远赢过预填和旧响应 */
 }
 /* 常驻目标摘要(紧凑条, 吸顶在阶段导航上方): 始终露当前动作+投入上限, 其余条件折叠查看 */
 function renderPlanSum(p){
@@ -703,8 +784,8 @@ async function saveTrial(){
   }
   busy(true);
   try{
-    const d=await api('/api/projects/'+cur.id+'/trials',{base:curBase,inputs,planVersion:pv});
-    cur=d.project;curBase=cur.version;render();
+    const d=await api('/api/projects/'+cur.id+'/trials',{base:curBase,inputs,planVersion:pv},{},{pid:cur.id});
+    if(cur&&cur.id===d.project.id){cur=d.project;curBase=cur.version;render();}
     const pl=d.trial.lines.find(l=>l.indexOf('净利')>0);
     toast(pl?'验证单已保存（计划v'+d.trial.planVersion+'）：净利 '+pl.split('净利 ')[1].split(' 元')[0]+' 元，复盘时 Skill 会读到':'验证单已保存（计划v'+d.trial.planVersion+'，利润账未填齐），复盘时 Skill 会读到');
   }catch(e){}
@@ -719,15 +800,40 @@ TV_IDS.forEach(k=>document.getElementById(TV_EL[k]).addEventListener('input',()=
 }));
 
 /* ---- 动作 ---- */
-async function sendMessage(preset){
-  const t=(preset!==undefined?preset:document.getElementById('wInput').value).trim();
-  if(!t){toast('先写点什么');return;}
+/* 会话失效恢复(R05): 用户确认后依据本事项记录重建会话并原样重发一次;
+ * 只有用户点确认才重试,不盲目重复计费。 */
+async function rebuildSessionAndRetry(pid,retry){
+  if(!confirm('和 AI 的对话会话已失效。\n要依据本事项的记录（已确认计划、历史版本、全部证据）重建会话，并把刚才那句话重发一次吗？'))
+    return;
   busy(true);
   try{
-    await api('/api/projects/'+cur.id+'/messages',{text:t,base:curBase});
-    document.getElementById('wInput').value='';
-    const d=await api('/api/projects/'+cur.id);cur=d.project;curBase=cur.version;render();
-  }catch(e){}
+    const d=await api('/api/projects/'+pid+'/session/rebuild',{base:cur&&cur.id===pid?curBase:undefined},undefined,{pid});
+    if(cur&&cur.id===pid){cur=d.project;curBase=cur.version;render();}
+    await retry();
+  }catch(e){/*已提示*/}
+  busy(false);
+}
+const sameAs=(el,v)=>el&&el.value===v;
+async function sendMessage(preset){
+  const el=document.getElementById('wInput');
+  const t=(preset!==undefined?preset:el.value).trim();
+  if(!t){toast('先写点什么');return;}
+  const pid=cur.id,base=curBase,sentRaw=el.value;
+  busy(true);
+  try{
+    await api('/api/projects/'+pid+'/messages',{text:t,base:base},undefined,{pid});
+    const d=await api('/api/projects/'+pid,null,'GET',{pid});
+    /* 响应只属于发起时的事项: 已切走就不替换当前页面/草稿,结果仍存 A(R02) */
+    if(cur&&cur.id===pid){
+      cur=d.project;curBase=cur.version;render();
+      /* 成功只清除"已提交那一版": 等待期间补写的内容原样保留(R02/T08) */
+      const i2=document.getElementById('wInput');
+      if(sameAs(i2,sentRaw)){i2.value='';if(curDrafts)curDrafts.discuss={};saveDrafts();}
+      else toast('你等待期间补写的内容已保留');
+    }
+  }catch(e){
+    if(e&&e.sessionLost&&cur&&cur.id===pid)await rebuildSessionAndRetry(pid,()=>sendMessage(t));
+  }
   busy(false);
 }
 async function confirmPlan(){
@@ -737,11 +843,12 @@ async function confirmPlan(){
     if(r===null)return;
     reason=r;
   }
+  const pid=cur.id,base=curBase;
   busy(true);
   try{
-    const d=await api('/api/projects/'+cur.id+'/plan/confirm',{base:curBase,reason});
-    cur=d.project;curBase=cur.version;viewPanel='exec';render();toast('计划已确认,去做,然后把真实结果记下来');
-  }catch(e){}
+    const d=await api('/api/projects/'+pid+'/plan/confirm',{base:base,reason},undefined,{pid});
+    if(cur&&cur.id===pid){cur=d.project;curBase=cur.version;viewPanel='exec';render();toast('计划已确认,去做,然后把真实结果记下来');}
+  }catch(e){/*已提示*/}
   busy(false);
 }
 async function saveDraft(){
@@ -758,11 +865,12 @@ async function saveDraft(){
     if(r===null)return;
     body.reason=r||'';
   }
+  const pid=cur.id;
   busy(true);
   try{
-    const d=await api('/api/projects/'+cur.id+'/plan',body);
-    cur=d.project;curBase=cur.version;render();toast('草案已存。确认后才替换当前计划');
-  }catch(e){}
+    const d=await api('/api/projects/'+pid+'/plan',body,undefined,{pid});
+    if(cur&&cur.id===pid){cur=d.project;curBase=cur.version;render();toast('草案已存。确认后才替换当前计划');}
+  }catch(e){/*已提示*/}
   busy(false);
 }
 async function saveExec(){
@@ -770,50 +878,140 @@ async function saveExec(){
     result:document.getElementById('eResult').value,evidence:document.getElementById('eEvidence').value,
     note:document.getElementById('eNote').value,base:curBase};
   if(!body.action.trim()){toast('写一下这条记录对应的动作');return;}
+  const snap={...body},pid=cur.id;
   busy(true);
   try{
-    const d=await api('/api/projects/'+cur.id+'/executions',body);
-    cur=d.project;curBase=cur.version;render();
-    for(const i of ['eAction','eInput','eResult','eEvidence','eNote'])document.getElementById(i).value='';
-    toast('已记录。证据够了就点「带着结果继续讨论」');
-  }catch(e){}
+    const d=await api('/api/projects/'+pid+'/executions',body,undefined,{pid});
+    if(cur&&cur.id===pid){
+      cur=d.project;curBase=cur.version;render();
+      const ids=['eAction','eInput','eResult','eEvidence','eNote'];
+      /* 只清掉与提交快照一致的内容;等待期间的补写保留(R02/T08) */
+      if(ids.every(f=>sameAs(document.getElementById(f),snap[f]))){
+        ids.forEach(f=>document.getElementById(f).value='');
+        clearDraft('exec');
+      }else toast('你等待期间补写的内容已保留');
+      toast('已记录。证据够了就点「带着结果继续讨论」');
+    }
+  }catch(e){/*失败保留原输入,已提示*/}
   busy(false);
 }
 async function doReview(){
+  const pid=cur.id,base=curBase;
   busy(true);
   try{
-    const r=await api('/api/projects/'+cur.id+'/review',{base:curBase});
-    cur=r.project;curBase=cur.version;viewPanel='result';render();
-    if(r.ai&&r.ai.protocolOk)toast('复盘完成，建议已显示在本面板');
-    else if(r.ai)toast('复盘回复到了但数据不合规（'+(r.ai.error||'未知')+'），原文留在讨论区,未计入已复盘');
-  }catch(e){}
+    const r=await api('/api/projects/'+pid+'/review',{base:base},undefined,{pid});
+    if(cur&&cur.id===pid){
+      cur=r.project;curBase=cur.version;viewPanel='result';render();
+      if(r.ai&&r.ai.protocolOk)toast('复盘完成，建议已显示在本面板');
+      else if(r.ai)toast('复盘回复到了但数据不合规（'+(r.ai.error||'未知')+'），原文留在讨论区,未计入已复盘');
+    }
+  }catch(e){
+    if(e&&e.hint)toast(e.hint);
+    if(e&&e.sessionLost&&cur&&cur.id===pid)await rebuildSessionAndRetry(pid,doReview);
+  }
   busy(false);
 }
 async function decide(type){
   const label={done:'达成',go:'继续验证',pause:'暂停',stop:'终止'}[type];
   const reason=prompt('记录「'+label+'」的理由和依据（可引用证据编号）:');
   if(reason===null)return;
+  const pid=cur.id;
   busy(true);
   try{
-    const d=await api('/api/projects/'+cur.id+'/decision',{type,reason:reason||'',base:curBase});
-    cur=d.project;curBase=cur.version;render();toast('已记录结局:'+label);
-  }catch(e){}
+    const d=await api('/api/projects/'+pid+'/decision',{type,reason:reason||'',base:curBase},undefined,{pid});
+    if(cur&&cur.id===pid){cur=d.project;curBase=cur.version;render();toast('已记录结局:'+label);}
+  }catch(e){/*已提示*/}
   busy(false);
 }
 
-/* ---- 方法与示例 ---- */
+/* ---- 方法与示例 ----
+ * 目录按服务端分组渲染;正文用内置安全渲染器(先转义再还原标签,外链新窗口,
+ * 相对 md 链接解析进目录,非法本地链接只留文字不伪装;脚本永不可执行)(R10) */
 let methodLoaded=false;
+let curMethodPath=null;
+const METHOD_PATH_OK=rel=>/^(chapters\/[^/]+\.md|deep-dive\/handbook\/[^/]+\.md|deep-dive\/tools\/[^/]+\.md|deep-dive\/cases\/[^/]+\/[^/]+\.md|cases\/[^/]+\.md|tools\/README\.md)$/.test(rel);
+function resolveMdLink(h){
+  const target=h.split('#')[0];
+  if(/^[a-z][a-z0-9+.-]*:/i.test(target))return null;          /* 外链/协议交给外链逻辑 */
+  if(!/\.(md|html)$/i.test(target))return null;
+  const baseDir=curMethodPath?curMethodPath.split('/').slice(0,-1).join('/'):'';
+  const out=[];
+  for(const seg of (baseDir+'/'+target).split('/')){
+    if(!seg||seg==='.')continue;
+    if(seg==='..'){out.pop();continue;}
+    out.push(seg);
+  }
+  const rel=out.join('/');
+  if(/\.html$/i.test(rel))return /^tools\/[\w一-鿿-]+\.html$/i.test(rel)?{tool:rel.slice(6)}:null;
+  return METHOD_PATH_OK(rel)?{md:rel}:null;
+}
+function mdInline(s,inlines){
+  s=esc(s);
+  s=s.replace(/(\d+)/g,(_,i)=>'<code style="background:#efe8db;border-radius:4px;padding:1px 6px;font-size:12.5px">'+esc(inlines[+i])+'</code>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,(m,t,h)=>{
+    if(/^https?:\/\//i.test(h))return '<a href="'+esc(h)+'" target="_blank" rel="noopener">'+t+'</a>';
+    const r=resolveMdLink(h);
+    if(r&&r.md)return '<a onclick="loadMethodByPath(\''+r.md+'\')">'+t+'</a>';
+    if(r&&r.tool)return '<a href="/tool/'+encodeURIComponent(r.tool)+'" target="_blank" rel="noopener">'+t+'（打开工具）</a>';
+    return t;                                                    /* 不可解析的本地链接只留文字 */
+  });
+  return s;
+}
+function mdToHtml(src){
+  const blocks=[];
+  let text=String(src==null?'':src).replace(/```[\s\S]*?```/g,m=>{blocks.push(m.replace(/^```\w*\n?/,'').replace(/```\s*$/,''));return ' B'+blocks.length+' ';});
+  const inlines=[];
+  text=text.replace(/`[^`\n]+`/g,m=>{inlines.push(m.slice(1,-1));return ''+inlines.length+'';});
+  const lines=text.split('\n');
+  let html='',listTag='';
+  const closeList=()=>{if(listTag){html+='</'+listTag+'>';listTag='';}};
+  for(const ln of lines){
+    const t=ln.trim();
+    if(!t){closeList();continue;}
+    let m;
+    if(m=/^(#{1,4})\s+(.*)$/.exec(t)){
+      closeList();
+      const lv=m[1].length;
+      html+='<h'+(lv+1)+' style="font-size:'+(21-lv*2.5)+'px;margin:12px 0 4px;color:var(--ink)">'+mdInline(m[2],inlines)+'</h'+(lv+1)+'>';
+      continue;
+    }
+    if(m=/^[-*]\s+(.*)$/.exec(t)){
+      if(!listTag){html+='<ul style="padding-left:20px;margin:4px 0">';listTag='ul';}
+      html+='<li style="margin:2px 0">'+mdInline(m[1],inlines)+'</li>';
+      continue;
+    }
+    if(m=/^\d+[.、]\s*(.*)$/.exec(t)){
+      if(!listTag){html+='<ol style="padding-left:22px;margin:4px 0">';listTag='ol';}
+      html+='<li style="margin:2px 0">'+mdInline(m[1],inlines)+'</li>';
+      continue;
+    }
+    closeList();
+    html+='<div style="margin:4px 0">'+mdInline(t,inlines)+'</div>';
+  }
+  closeList();
+  html=html.replace(/ B(\d+) /g,(_,i)=>'<pre style="background:#f4efe6;border-radius:8px;padding:10px 12px;font-size:12.5px;overflow:auto;margin:6px 0;white-space:pre-wrap">'+esc(blocks[+i-1])+'</pre>');
+  return html;
+}
 async function loadMethods(){
   if(methodLoaded)return;methodLoaded=true;
   const d=await api('/api/methods');
-  document.getElementById('methodList').innerHTML=d.methods.map(m=>`<button onclick="loadMethod('${esc(m.path)}',this)">${esc(m.title)}</button>`).join('');
+  document.getElementById('methodList').innerHTML=(d.groups||[{label:'目录',items:d.methods}]).map(g=>
+    '<div class="sub" style="margin:10px 0 3px;font-weight:700;color:var(--wood)">'+esc(g.label)+'</div>'
+    +g.items.map(m=>'<button onclick="loadMethodByPath(\''+esc(m.path)+'\',this)">'+esc(m.title)+'</button>').join('')
+  ).join('');
 }
 async function loadMethod(p,btn){
   for(const b of document.querySelectorAll('.mlist button'))b.classList.remove('on');
-  btn.classList.add('on');
+  if(btn)btn.classList.add('on');
+  await loadMethodByPath(p);
+}
+async function loadMethodByPath(p,btn){
+  if(btn){for(const b of document.querySelectorAll('.mlist button'))b.classList.remove('on');btn.classList.add('on');}
   const d=await api('/api/methods/content?p='+encodeURIComponent(p));
-  document.getElementById('methodTitle').textContent=p;
-  document.getElementById('methodBody').textContent=d.content;
+  curMethodPath=p;
+  document.getElementById('methodTitle').textContent=p.split('/').pop().replace(/\.md$/,'');
+  document.getElementById('methodBody').innerHTML=mdToHtml(d.content);
 }
 </script>
 </body>
