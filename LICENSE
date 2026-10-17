@@ -1,14 +1,26 @@
 # 许可证说明
 
-本仓库包含**文字内容**与**代码**两部分，分别适用不同许可证：
+本仓库包含**文字内容**与**代码**两部分，分别适用不同许可证。一个目录只归一类；混合感知说明见文末。
 
-## 文字内容（chapters/、cases/、README.md、skills/ 下的 SKILL.md）
+## 文字内容（CC BY 4.0）
+
+适用于：
+
+- `chapters/`（第零步 + 五编）、`cases/`（案例库）
+- `deep-dive/`（《从一个念头到一门生意》手册、工具表、案例、系统说明——含 archive/research 子目录中的文字稿）
+- `README.md`、`tools/README.md`、各 `SKILL.md` 等 Markdown 文档
 
 采用 [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/deed.zh-hans)（CC BY 4.0）发布。
 
 你可以自由地共享、演绎（包括商业性使用），惟须署名：给出适当的署名，提供指向本许可证的链接，同时标明是否作了修改。署名格式示例：「本文源自《成事方法论》（链接），有修改」
 
-## 代码（tools/ 下的 HTML/JavaScript）
+## 代码（MIT）
+
+适用于：
+
+- `tools/` 下的 HTML/JavaScript 工具（`.html`、`.js`）
+- `app/`（工作台页面）、`runtime/`（本地服务、适配器、启动器）、`installer/`（一键安装器）
+- 根目录 `index.html` 及其脚本样式
 
 采用 MIT License 发布：
 
@@ -35,3 +47,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## 混合说明
+
+- 上述代码文件（HTML/JS）内嵌的界面文案、注释随代码文件整体适用 MIT；`tools/README.md`、`skills/` 下的 SKILL.md 等 Markdown 文档按文字内容适用 CC BY 4.0。
+- 第三方素材与署名（如有）在各文件头部注明，原许可与署名保留，不受本说明影响。
